@@ -1,0 +1,9 @@
+[package]
+name = "knx_tun"
+version = "0.1.0"
+authors = ["ede1998 <online@erik-hennig.me>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
