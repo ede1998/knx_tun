@@ -4,23 +4,9 @@ pub enum Body {
     ConnectRequest(ConnectRequest),
 }
 
-impl Body {
-    pub fn serialize(&self) -> Vec<u8> {
-        match self {
-            Body::ConnectRequest(req) => req.serialize(),
-        }
-    }
-
-    pub fn len(&self) -> u16 {
-        match self {
-            Body::ConnectRequest(_) => ConnectRequest::len() as u16,
-        }
-    }
-}
-
 pub struct Frame {
-    header: Header,
-    body: Body,
+    pub header: Header,
+    pub body: Body,
 }
 
 impl Frame {
@@ -31,9 +17,7 @@ impl Frame {
 
     pub fn serialize(&self) -> Vec<u8> {
         // let mut result = self.header.serialize();
-        let mut result = vec![];
-        result.extend_from_slice(&self.body.serialize());
-        result
+        vec![]
     }
 
     /// Set the frame's body.

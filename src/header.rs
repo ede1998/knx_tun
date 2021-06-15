@@ -62,44 +62,22 @@ impl Header {
         }
     }
 
-    const LENGTH: u16 = 0x06;
-}
-
-pub mod gen {
-    use super::*;
-    use crate::serialization_helper::length_be_u8;
-    use cookie_factory::{
-        bytes::{be_u16, be_u8},
-        sequence::tuple,
-        SerializeFn,
-    };
-    use std::io::Write;
-
-    pub(crate) fn header<'a, W: Write + 'a>(m: &'a Header) -> impl SerializeFn<W> + 'a {
-        length_be_u8(
-            true,
-            tuple((
-                be_u8(m.version.into()),
-                be_u16(m.service_type.into()),
-                be_u16(m.body_length + Header::LENGTH),
-            )),
-        )
-    }
+    pub const LENGTH: u16 = 0x06;
 }
 
 pub mod parse {
     use super::*;
+    use crate::parse_helper::length_data_incl;
     use nom::{
         combinator::{map, verify},
-        multi::length_data,
         number::streaming::{be_u16, be_u8},
         IResult,
     };
 
     pub(crate) fn header(i: &[u8]) -> IResult<&[u8], Header> {
-        let (i, inner) = length_data(be_u8)(i)?;
-        let header_len = inner.len() as u16;
-        let (inner, version) =
+        let (i, inner) = length_data_incl(be_u8)(i)?;
+        let header_len = 1 + inner.len() as u16;
+        let (inner, _) =
             verify(ProtocolVersion::parse, |&p| p == ProtocolVersion::V1_0)(inner)?;
         let (inner, service_type) = ServiceType::parse(inner)?;
         let (_, body_length) = map(be_u16, |total_length| total_length - header_len)(inner)?;
@@ -112,19 +90,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serialize_header() {
-        let header = Header::new(ServiceType::DescriptionRequest, 0x1234);
-        let (serialized, len) = cookie_factory::gen(gen::header(&header), vec![]).unwrap();
+    fn parse_header() {
+        let serialized = vec![0x06, 0x10, 0x02, 0x03, 0x12, 0x34 + 0x06];
+        let (remainder, result) = parse::header(&serialized).unwrap();
 
-        println!("{:#x?}", serialized);
-        println!("{:#x?}", len);
-        assert_eq!(serialized.len(), 0x06, "Wrong length.");
-        assert_eq!(len, 0x06, "Wrong length in result.");
-        assert_eq!(serialized[0], 6, "Wrong header length.");
-        assert_eq!(serialized[1], 0x10, "Wrong protocol version.");
-        assert_eq!(serialized[2], 0x02, "Wrong service_type high value.");
-        assert_eq!(serialized[3], 0x03, "Wrong service_type low value.");
-        assert_eq!(serialized[4], 0x12, "Wrong total length high value.");
-        assert_eq!(serialized[5], 0x34 + 0x06, "Wrong total length high value.");
+        assert!(remainder.is_empty(), "Output was not consumed entirely.");
+        let expected = Header::new(ServiceType::DescriptionRequest, 0x1234);
+        assert_eq!(expected, result);
     }
 }

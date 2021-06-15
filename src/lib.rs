@@ -5,7 +5,8 @@ pub mod frame;
 pub mod cri;
 pub mod dib;
 pub mod address;
-mod serialization_helper;
+mod gen;
+mod parse_helper;
 
 #[cfg(test)]
 mod tests {
