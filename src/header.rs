@@ -1,4 +1,4 @@
-use nom_derive::{NomBE, Parse};
+use nom_derive::NomBE;
 use rusticata_macros::newtype_enum;
 
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
@@ -63,39 +63,4 @@ impl Header {
     }
 
     pub const LENGTH: u16 = 0x06;
-}
-
-pub mod parse {
-    use super::*;
-    use crate::parse_helper::length_data_incl;
-    use nom::{
-        combinator::{map, verify},
-        number::streaming::{be_u16, be_u8},
-        IResult,
-    };
-
-    pub(crate) fn header(i: &[u8]) -> IResult<&[u8], Header> {
-        let (i, inner) = length_data_incl(be_u8)(i)?;
-        let header_len = 1 + inner.len() as u16;
-        let (inner, _) =
-            verify(ProtocolVersion::parse, |&p| p == ProtocolVersion::V1_0)(inner)?;
-        let (inner, service_type) = ServiceType::parse(inner)?;
-        let (_, body_length) = map(be_u16, |total_length| total_length - header_len)(inner)?;
-        Ok((i, Header::new(service_type, body_length)))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_header() {
-        let serialized = vec![0x06, 0x10, 0x02, 0x03, 0x12, 0x34 + 0x06];
-        let (remainder, result) = parse::header(&serialized).unwrap();
-
-        assert!(remainder.is_empty(), "Output was not consumed entirely.");
-        let expected = Header::new(ServiceType::DescriptionRequest, 0x1234);
-        assert_eq!(expected, result);
-    }
 }

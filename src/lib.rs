@@ -6,7 +6,7 @@ pub mod cri;
 pub mod dib;
 pub mod address;
 mod gen;
-mod parse_helper;
+mod parse;
 
 #[cfg(test)]
 mod tests {
