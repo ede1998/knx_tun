@@ -1,6 +1,8 @@
 use nom_derive::NomBE;
 use rusticata_macros::newtype_enum;
 
+use crate::{cri::ConnectRequest};
+
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 pub struct ServiceType(u16);
 
@@ -63,4 +65,30 @@ impl Header {
     }
 
     pub const LENGTH: u16 = 0x06;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
+pub enum Body {
+    ConnectRequest(ConnectRequest),
+}
+
+impl Body {
+    fn as_service_type(&self) -> ServiceType {
+        match self {
+            Self::ConnectRequest(_) => ServiceType::ConnectRequest,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
+pub struct Frame {
+    pub header: Header,
+    pub body: Body,
+}
+
+impl Frame {
+    pub fn wrap(body: Body) -> Self {
+        let header = Header::new(body.as_service_type(), 0);
+        Self { header, body }
+    }
 }
