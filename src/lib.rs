@@ -4,8 +4,7 @@ pub mod core;
 pub mod cri;
 pub mod dib;
 pub mod address;
-mod gen;
-mod parse;
+mod snack;
 
 #[cfg(test)]
 mod tests {

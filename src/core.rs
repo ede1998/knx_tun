@@ -1,13 +1,12 @@
+use crate::snack::*;
+use cookie_factory::BackToTheBuffer;
 use nom_derive::NomBE;
-use rusticata_macros::newtype_enum;
 
-use crate::{cri::ConnectRequest};
+use crate::cri::ConnectRequest;
 
-#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
-pub struct ServiceType(u16);
-
-newtype_enum! {
-    impl debug ServiceType {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[repr(u16)]
+pub enum ServiceType {
     SearchRequest = 0x0201,
     SearchResponse = 0x0202,
     DescriptionRequest = 0x0203,
@@ -25,26 +24,22 @@ newtype_enum! {
     RoutingIndication = 0x0530,
     RoutingLostMessage = 0x531,
 }
-}
 
 impl From<ServiceType> for u16 {
-    fn from(s: ServiceType) -> Self {
-        s.0
+    fn from(f: ServiceType) -> Self {
+        f as u16
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
-pub struct ProtocolVersion(u8);
-
-newtype_enum! {
-    impl debug ProtocolVersion {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[repr(u8)]
+pub enum ProtocolVersion {
     V1_0 = 0x10,
-}
 }
 
 impl From<ProtocolVersion> for u8 {
-    fn from(pv: ProtocolVersion) -> Self {
-        pv.0
+    fn from(f: ProtocolVersion) -> Self {
+        f as u8
     }
 }
 
@@ -65,6 +60,28 @@ impl Header {
     }
 
     pub const LENGTH: u16 = 0x06;
+
+    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+        use nm::*;
+        let (i, inner) = length_data_incl(be_u8)(i)?;
+        let header_len = 1 + inner.len() as u16;
+        let (inner, _) = verify(ProtocolVersion::parse, |&p| p == ProtocolVersion::V1_0)(inner)?;
+        let (inner, service_type) = ServiceType::parse(inner)?;
+        let (_, body_length) = map(be_u16, |total_length| total_length - header_len)(inner)?;
+        Ok((i, Header::new(service_type, body_length)))
+    }
+
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        length_data_incl(
+            1,
+            tuple((
+                be_u8(self.version.into()),
+                be_u16(self.service_type.into()),
+                be_u16(self.body_length + Header::LENGTH),
+            )),
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -76,6 +93,21 @@ impl Body {
     fn as_service_type(&self) -> ServiceType {
         match self {
             Self::ConnectRequest(_) => ServiceType::ConnectRequest,
+        }
+    }
+
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        match self {
+            Body::ConnectRequest(m) => be_u16(0),
+        }
+    }
+
+    pub(crate) fn parse(i: &[u8], service_type: ServiceType) -> IResult<&[u8], Body> {
+        use nm::*;
+        match service_type {
+            ServiceType::ConnectRequest => into(ConnectRequest::parse)(i),
+            _ => Err(Err::Error(make_error(i, ErrorKind::Switch))),
         }
     }
 }
@@ -90,5 +122,64 @@ impl Frame {
     pub fn wrap(body: Body) -> Self {
         let header = Header::new(body.as_service_type(), 0);
         Self { header, body }
+    }
+
+    pub(crate) fn gen<'a, W: BackToTheBuffer + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        // TODO header length field must be set correctly
+        back_to_the_buffer(
+            Header::LENGTH as usize,
+            move |buf: WriteContext<W>| gen(self.body.gen(), buf),
+            move |buf, _| gen_simple(self.header.gen(), buf),
+        )
+    }
+
+    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Frame> {
+        use nm::*;
+        let (i, header) = Header::parse(i)?;
+        let (i, inner) = take(header.body_length)(i)?;
+        let (inner, body) = Body::parse(inner, header.service_type)?;
+        Ok((i, Frame { header, body }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_header() {
+        let serialized = vec![0x06, 0x10, 0x02, 0x03, 0x12, 0x34 + 0x06];
+        let (remainder, result) = Header::parse(&serialized).unwrap();
+
+        assert!(remainder.is_empty(), "Output was not consumed entirely.");
+        let expected = Header::new(ServiceType::DescriptionRequest, 0x1234);
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn gen_header() {
+        let header = Header::new(ServiceType::DescriptionRequest, 0x1234);
+        let (serialized, len) = cf::gen(header.gen(), vec![]).unwrap();
+
+        println!("{:#x?}", serialized);
+        println!("{:#x?}", len);
+        assert_eq!(serialized.len(), 0x06, "Wrong length.");
+        assert_eq!(len, 0x06, "Wrong length in result.");
+        assert_eq!(serialized[0], 6, "Wrong header length.");
+        assert_eq!(serialized[1], 0x10, "Wrong protocol version.");
+        assert_eq!(serialized[2], 0x02, "Wrong service_type high value.");
+        assert_eq!(serialized[3], 0x03, "Wrong service_type low value.");
+        assert_eq!(serialized[4], 0x12, "Wrong total length high value.");
+        assert_eq!(serialized[5], 0x34 + 0x06, "Wrong total length high value.");
+    }
+
+    #[test]
+    fn parse_gen_header() {
+        let serialized = vec![0x06, 0x10, 0x02, 0x03, 0x12, 0x34 + 0x06];
+        let header = Header::parse(&serialized).unwrap().1;
+        let re_serialized = cf::gen_simple(header.gen(), vec![]).unwrap();
+
+        assert_eq!(&serialized[..], &re_serialized[..]);
     }
 }
