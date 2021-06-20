@@ -3,7 +3,7 @@ use crate::snack::*;
 use nom_derive::*;
 
 use crate::core::Body;
-use crate::hpai::HostProtocolAddressInformation;
+use crate::hpai::Hpai;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[repr(u8)]
@@ -23,7 +23,7 @@ impl From<KnxLayer> for u8 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub enum ConnectionRequestInformation {
+pub enum Cri {
     /// 0x03 Data connection used to configure a KNXnet/IP device
     DeviceManagement,
     /// 0x08 Data connection used for configuration and data transfer with an Object Server in a KNXnet/IP device.
@@ -36,13 +36,17 @@ pub enum ConnectionRequestInformation {
     Tunnel(Tunnel),
 }
 
-impl From<Tunnel> for ConnectionRequestInformation {
+impl From<Tunnel> for Cri {
     fn from(f: Tunnel) -> Self {
         Self::Tunnel(f)
     }
 }
 
-impl ConnectionRequestInformation {
+impl Cri {
+    pub fn new_tunnel(layer: KnxLayer) -> Self {
+        Tunnel { layer }.into()
+    }
+
     pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
         use nm::*;
         into(Tunnel::parse)(i)
@@ -87,9 +91,9 @@ pub enum ConnectionResponseDataBlock {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct ConnectRequest {
-    pub control_endpoint: HostProtocolAddressInformation,
-    pub data_endpoint: HostProtocolAddressInformation,
-    pub cri: ConnectionRequestInformation,
+    pub control_endpoint: Hpai,
+    pub data_endpoint: Hpai,
+    pub cri: Cri,
 }
 
 impl From<ConnectRequest> for Body {
@@ -101,8 +105,6 @@ impl From<ConnectRequest> for Body {
 impl ConnectRequest {
     pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
         use nm::*;
-        type Hpai = HostProtocolAddressInformation;
-        type Cri = ConnectionRequestInformation;
         map(
             tuple((Hpai::parse, Hpai::parse, Cri::parse)),
             |(ctl, data, cri)| ConnectRequest {
@@ -111,5 +113,30 @@ impl ConnectRequest {
                 cri,
             },
         )(i)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hpai::HostProtocolCode;
+
+    #[test]
+    fn parse_connect_request() {
+        #[rustfmt::skip]
+        let serialized = [
+            0x08, 0x01, 192, 168, 200, 12, 0xC3, 0xB4, // ctrl hpai
+            0x08, 0x01, 192, 168, 200, 20, 0xC3, 0xB5, // data hpai
+            0x04, 0x04, 0x02, 0x00, // cri
+        ];
+
+        let (rem, cr) = ConnectRequest::parse(&serialized).unwrap();
+
+        let ctrl = Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 12], 50100);
+        let data = Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 20], 50101);
+        assert_eq!(0, rem.len());
+        assert_eq!(cr.data_endpoint, data);
+        assert_eq!(cr.control_endpoint, ctrl);
+        assert_eq!(cr.cri, Cri::new_tunnel(KnxLayer::LinkLayer));
     }
 }

@@ -1,6 +1,6 @@
 use crate::snack::*;
 use nom_derive::NomBE;
-use std::net::SocketAddrV4;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[repr(u8)]
@@ -16,16 +16,23 @@ impl From<HostProtocolCode> for u8 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub struct HostProtocolAddressInformation {
+pub struct Hpai {
     pub protocol_code: HostProtocolCode,
     pub address: SocketAddrV4,
 }
 
-impl HostProtocolAddressInformation {
+impl Hpai {
     pub fn new(protocol_code: HostProtocolCode, address: SocketAddrV4) -> Self {
         Self {
             protocol_code,
             address,
+        }
+    }
+    
+    pub fn new_from_parts<T: Into<Ipv4Addr>>(protocol_code: HostProtocolCode, ip: T, port: u16) -> Self {
+        Self {
+            protocol_code,
+            address: SocketAddrV4::new(ip.into(), port),
         }
     }
 
@@ -43,11 +50,13 @@ impl HostProtocolAddressInformation {
 
     pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
         use nm::*;
-        let (i, protocol_code) = HostProtocolCode::parse(i)?;
-        let (i, ip) = be_u32(i)?;
-        let (i, port) = be_u16(i)?;
-        let address = SocketAddrV4::new(ip.into(), port);
-        Ok((i, Self::new(protocol_code, address)))
+        length_value_incl(
+            be_u8,
+            map(
+                tuple((HostProtocolCode::parse, be_u32, be_u16)),
+                |(code, ip, port)| Self::new(code, SocketAddrV4::new(ip.into(), port)),
+            ),
+        )(i)
     }
 }
 
@@ -59,7 +68,7 @@ mod tests {
 
     #[test]
     fn gen_host_protocol_address_information() {
-        let info = HostProtocolAddressInformation::new(
+        let info = Hpai::new(
             HostProtocolCode::Ipv4Udp,
             SocketAddrV4::new(Ipv4Addr::new(127, 143, 231, 144), 48),
         );
@@ -77,5 +86,19 @@ mod tests {
         assert_eq!(serialized[5], 144, "Wrong ip address octet 4.");
         assert_eq!(serialized[6], 000, "Wrong port low value.");
         assert_eq!(serialized[7], 048, "Wrong port high value.");
+    }
+
+    #[test]
+    fn parse_host_protocol_address_information() {
+        let serialized = [0x08, 0x01, 192, 168, 200, 12, 0xC3, 0xB4];
+
+        let (rem, hpai) = Hpai::parse(&serialized).unwrap();
+
+        let expected = Hpai::new(
+            HostProtocolCode::Ipv4Udp,
+            SocketAddrV4::new(Ipv4Addr::new(192, 168, 200, 12), 50100),
+        );
+        assert_eq!(0, rem.len());
+        assert_eq!(hpai, expected);
     }
 }
