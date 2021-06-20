@@ -22,7 +22,7 @@ pub struct Hpai {
 }
 
 impl Hpai {
-    pub fn new(protocol_code: HostProtocolCode, address: SocketAddrV4) -> Self {
+    pub const fn new(protocol_code: HostProtocolCode, address: SocketAddrV4) -> Self {
         Self {
             protocol_code,
             address,

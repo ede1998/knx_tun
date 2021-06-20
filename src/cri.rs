@@ -43,8 +43,8 @@ impl From<Tunnel> for Cri {
 }
 
 impl Cri {
-    pub fn new_tunnel(layer: KnxLayer) -> Self {
-        Tunnel { layer }.into()
+    pub const fn new_tunnel(layer: KnxLayer) -> Self {
+        Self::Tunnel(Tunnel { layer })
     }
 
     pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
@@ -75,15 +75,27 @@ impl Tunnel {
         use nm::*;
         length_value_incl(
             be_u8,
-            map(tuple((tag(Self::TAG), KnxLayer::parse)), |(_, l)| Self {
-                layer: l,
-            }),
+            map(
+                tuple((
+                    tag(Self::TAG),
+                    KnxLayer::parse,
+                    be_u8, // reserved byte
+                )),
+                |(_, l, _)| Self { layer: l },
+            ),
         )(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        length_data_incl(1, tuple((slice(Self::TAG), be_u8(self.layer.into()))))
+        length_data_incl(
+            1,
+            tuple((
+                slice(Self::TAG),
+                be_u8(self.layer.into()),
+                be_u8(0), // reserved byte
+            )),
+        )
     }
 }
 
@@ -103,6 +115,14 @@ impl From<ConnectRequest> for Body {
 }
 
 impl ConnectRequest {
+    pub const fn new(control_endpoint: Hpai, data_endpoint: Hpai, cri: Cri) -> Self {
+        Self {
+            control_endpoint,
+            data_endpoint,
+            cri,
+        }
+    }
+
     pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
         use nm::*;
         map(
@@ -114,6 +134,15 @@ impl ConnectRequest {
             },
         )(i)
     }
+
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        tuple((
+            self.control_endpoint.gen(),
+            self.data_endpoint.gen(),
+            self.cri.gen(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -121,22 +150,34 @@ mod tests {
     use super::*;
     use crate::hpai::HostProtocolCode;
 
+    const TEST_DATA_CR: [u8; 20] = [
+        0x08, 0x01, 192, 168, 200, 12, 0xC3, 0xB4, // ctrl hpai
+        0x08, 0x01, 192, 168, 200, 20, 0xC3, 0xB5, // data hpai
+        0x04, 0x04, 0x02, 0x00, // cri
+    ];
+
+    fn make_test_cr() -> ConnectRequest {
+        ConnectRequest::new(
+            Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 12], 50100),
+            Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 20], 50101),
+            Cri::new_tunnel(KnxLayer::LinkLayer),
+        )
+    }
+
     #[test]
     fn parse_connect_request() {
-        #[rustfmt::skip]
-        let serialized = [
-            0x08, 0x01, 192, 168, 200, 12, 0xC3, 0xB4, // ctrl hpai
-            0x08, 0x01, 192, 168, 200, 20, 0xC3, 0xB5, // data hpai
-            0x04, 0x04, 0x02, 0x00, // cri
-        ];
+        let (rem, actual) = ConnectRequest::parse(&TEST_DATA_CR).unwrap();
 
-        let (rem, cr) = ConnectRequest::parse(&serialized).unwrap();
-
-        let ctrl = Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 12], 50100);
-        let data = Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 20], 50101);
         assert_eq!(0, rem.len());
-        assert_eq!(cr.data_endpoint, data);
-        assert_eq!(cr.control_endpoint, ctrl);
-        assert_eq!(cr.cri, Cri::new_tunnel(KnxLayer::LinkLayer));
+        let expected = make_test_cr();
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn gen_connect_request() {
+        let to_serialize = make_test_cr();
+        let (actual, len) = cookie_factory::gen(to_serialize.gen(), vec![]).unwrap();
+        assert_eq!(len, TEST_DATA_CR.len() as u64);
+        assert_eq!(&TEST_DATA_CR[..], &actual[..]);
     }
 }
