@@ -3,7 +3,7 @@ pub mod core;
 pub mod cri;
 pub mod dib;
 pub mod hpai;
-mod snack;
+pub mod snack;
 
 #[cfg(test)]
 mod tests {

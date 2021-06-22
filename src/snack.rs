@@ -56,7 +56,7 @@ pub mod nm {
     }
 
     impl<'a> fmt::Debug for Error<&'a [u8]> {
-    /// Algorithm copied from https://fasterthanli.me/series/making-our-own-ping/part-9
+        /// Algorithm copied from https://fasterthanli.me/series/making-our-own-ping/part-9
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(f, "/!\\ parsing error\n")?;
 
@@ -176,6 +176,57 @@ pub mod nm {
             }),
             g,
         )
+    }
+
+    /// Repeats the embedded parser until the input is exhausted
+    /// and returns the results in a `Vec`.
+    ///
+    /// If the embedded parser returns an error, `all0` stops parsing
+    /// and returns this error.
+    ///
+    /// # Arguments
+    /// * `f` The parser to apply.
+    ///
+    /// *Note*: if the parser passed to `all0` accepts empty inputs
+    /// (like `alpha0` or `digit0`), `all0` will return an error,
+    /// to prevent going into an infinite loop
+    ///
+    /// ```rust
+    /// # use nom::{Err, error::{ErrorKind, Error}, Needed, IResult};
+    /// use knx_tun::snack::nm::all0;
+    /// use nom::bytes::complete::tag;
+    ///
+    /// fn parser(s: &str) -> IResult<&str, Vec<&str>> {
+    ///   all0(tag("abc"))(s)
+    /// }
+    ///
+    /// assert_eq!(parser("abcabc"), Ok(("", vec!["abc", "abc"])));
+    /// assert_eq!(parser("abc123"), Err(Err::Error(Error::new("123", ErrorKind::Tag))));
+    /// assert_eq!(parser("123123"), Err(Err::Error(Error::new("123123", ErrorKind::Tag))));
+    /// assert_eq!(parser(""), Ok(("", vec![])));
+    /// ```
+    pub fn all0<I, O, E, F>(mut f: F) -> impl FnMut(I) -> IResult<I, Vec<O>, E>
+    where
+        I: InputLength + PartialEq + Clone,
+        F: Parser<I, O, E>,
+        E: NomParseError<I>,
+    {
+        move |mut i: I| {
+            let mut acc = Vec::with_capacity(4);
+            while i.input_len() > 0 {
+                match f.parse(i.clone()) {
+                    Ok((inner, o)) => {
+                        if i == inner {
+                            return Err(Err::Error(E::from_error_kind(i, NomErrorKind::Many0)));
+                        }
+                        acc.push(o);
+                        i = inner;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok((i, acc))
+        }
     }
 
     /// Reads a fixed size array with `N` items from the input.

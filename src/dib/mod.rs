@@ -66,10 +66,10 @@ impl Dib {
         context(
             "DIB",
             length_value_incl(be_u8, |i| {
-                let (i, con_type) = dbg!(DescriptionType::parse(i))?;
+                let (i, con_type) = DescriptionType::parse(i)?;
                 match con_type {
                     DescriptionType::DeviceInfo => into(DeviceInfo::parse)(i),
-                    DescriptionType::SuppSvcFamilies => dbg!(into(many0(ServiceFamily::parse))(i)),
+                    DescriptionType::SuppSvcFamilies => into(all0(ServiceFamily::parse))(i),
                     _ => unimplemented!(),
                 }
             }),
@@ -120,8 +120,7 @@ mod tests {
 
     #[test]
     fn parse_empty_dib() {
-        let result = Dib::parse(&[2, 2, 1, 1]);
-        let (rem, actual) = result.unwrap();
+        let (rem, actual) = Dib::parse(&[2, 2]).unwrap();
 
         assert_eq!(0, rem.len());
         assert_eq!(Dib::SupportedServiceFamilies(Vec::new()), actual);
