@@ -69,7 +69,7 @@ impl Dib {
                 let (i, con_type) = dbg!(DescriptionType::parse(i))?;
                 match con_type {
                     DescriptionType::DeviceInfo => into(DeviceInfo::parse)(i),
-                    // DescriptionType::SuppSvcFamilies => dbg!(into(many0(ServiceFamily::parse))(i)),
+                    DescriptionType::SuppSvcFamilies => dbg!(into(many0(ServiceFamily::parse))(i)),
                     _ => unimplemented!(),
                 }
             }),
