@@ -34,9 +34,9 @@ impl Address {
         self.device
     }
 
-    pub(crate) fn parse(i: &[u8], kind: AddressKind) -> IResult<&[u8], Self> {
+    pub(crate) fn parse(i: &[u8], kind: AddressKind) -> IResult<Self> {
         use nm::*;
-        let (i, (subnet, device)) = tuple((be_u8, be_u8))(i)?;
+        let (i, (subnet, device)) = context("KNX address", tuple((be_u8, be_u8)))(i)?;
         let addr = Address {
             kind,
             device,

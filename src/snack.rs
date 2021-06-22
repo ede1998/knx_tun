@@ -2,16 +2,21 @@
 //! Additionally, there are helpers methods and macros here for nom and cookie factory.
 
 pub use cookie_factory::SerializeFn;
-pub use nom::IResult;
 pub use std::io::Write;
+
+pub type IResult<'a, O> = nom::IResult<In<'a>, O, VerboseError<'a>>;
+pub type VerboseError<'a> = nom::error::VerboseError<In<'a>>;
+pub type In<'a> = &'a [u8];
 
 /// Nom specific re-exports and helpers
 pub mod nm {
     pub use nom::branch::alt;
     pub use nom::bytes::complete::{tag, take};
     pub use nom::combinator::{into, map, verify};
-    pub use nom::error::ParseError;
-    pub use nom::error::{make_error, ErrorKind};
+    pub use nom::error::{
+        context, make_error, ContextError as NomContextError, Error as NomError,
+        ErrorKind as NomErrorKind, ParseError as NomParseError,
+    };
     pub use nom::multi::{length_data, length_value, many0};
     pub use nom::number::complete::*;
     pub use nom::sequence::tuple;
@@ -21,7 +26,41 @@ pub mod nm {
     use nom::combinator::map_opt;
     use nom::{IResult, InputLength, InputTake, ToUsize};
 
-    pub type NomError<'a> = nom::error::Error<&'a [u8]>;
+    // #[derive(Debug)]
+    // pub enum ErrorKind {
+    //     Nom(NomErrorKind),
+    //     Context(&'static str),
+    // }
+
+    // #[derive(Debug)]
+    // pub struct Error<I> {
+    //     pub errors: Vec<(I, ErrorKind)>,
+    // }
+
+    // impl<I> From<NomError<I>> for Error<I> {
+    //     fn from(f: NomError<I>) -> Self {
+    //         NomParseError::from_error_kind(f.input, f.code)
+    // }
+    // }
+
+    // impl<I> NomParseError<I> for Error<I> {
+    //     fn from_error_kind(input: I, kind: NomErrorKind) -> Self {
+    //         let errors = vec![(input, ErrorKind::Nom(kind))];
+    //         Self { errors }
+    //     }
+
+    //     fn append(input: I, kind: NomErrorKind, mut other: Self) -> Self {
+    //         other.errors.push((input, ErrorKind::Nom(kind)));
+    //         other
+    //     }
+    // }
+
+    // impl<I> NomContextError<I> for Error<I> {
+    //     fn add_context(input: I, ctx: &'static str, mut other: Self) -> Self {
+    //         other.errors.push((input, ErrorKind::Context(ctx)));
+    //         other
+    //     }
+    // }
 
     /// Wraps `length_data`. Gets a number N from the parser and returns a
     /// subslice of the input of that size. Differs from `length_data` because
@@ -33,7 +72,7 @@ pub mod nm {
         I: InputLength + InputTake + Clone,
         N: ToUsize,
         F: Parser<I, N, E>,
-        E: ParseError<I>,
+        E: NomParseError<I>,
     {
         length_data(map_opt(f, |len| {
             len.to_usize().checked_sub(std::mem::size_of::<N>())
@@ -51,7 +90,7 @@ pub mod nm {
         N: ToUsize,
         F: Parser<I, N, E>,
         G: Parser<I, O, E>,
-        E: ParseError<I>,
+        E: NomParseError<I>,
     {
         length_value(
             map_opt(f, |len| {
@@ -62,9 +101,9 @@ pub mod nm {
     }
 
     /// Reads a fixed size array with `N` items from the input.
-    pub fn fixed_slice<const N: usize>(i: &[u8]) -> IResult<&[u8], [u8; N]> {
+    pub fn fixed_slice<const N: usize>(i: &[u8]) -> super::IResult<[u8; N]> {
         if i.input_len() < N {
-            return Err(Err::Error(make_error(i, ErrorKind::Eof)));
+            return Err(Err::Error(make_error(i, NomErrorKind::Eof)));
         }
 
         let mut data = [0; N];

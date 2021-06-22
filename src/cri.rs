@@ -6,6 +6,7 @@ use crate::core::Body;
 use crate::hpai::Hpai;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[nom(GenericErrors)]
 #[repr(u8)]
 pub enum KnxLayer {
     /// Establish a Data Link Layer tunnel to the KNX network.
@@ -47,9 +48,9 @@ impl Cri {
         Self::Tunnel(Tunnel { layer })
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
         use nm::*;
-        into(Tunnel::parse)(i)
+        context("ConnectRequestInformation", into(Tunnel::parse))(i)
         // alt((
         //     into(Tunnel::parse),
         //     into(...)
@@ -71,17 +72,20 @@ pub struct Tunnel {
 
 impl Tunnel {
     make_tag! {0x04, u8}
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
         use nm::*;
-        length_value_incl(
-            be_u8,
-            map(
-                tuple((
-                    tag(Self::TAG),
-                    KnxLayer::parse,
-                    be_u8, // reserved byte
-                )),
-                |(_, l, _)| Self { layer: l },
+        context(
+            "CRI-Tunnel",
+            length_value_incl(
+                be_u8,
+                map(
+                    tuple((
+                        tag(Self::TAG),
+                        KnxLayer::parse,
+                        be_u8, // reserved byte
+                    )),
+                    |(_, l, _)| Self { layer: l },
+                ),
             ),
         )(i)
     }
@@ -123,15 +127,18 @@ impl ConnectRequest {
         }
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
         use nm::*;
-        map(
-            tuple((Hpai::parse, Hpai::parse, Cri::parse)),
-            |(ctl, data, cri)| ConnectRequest {
-                control_endpoint: ctl,
-                data_endpoint: data,
-                cri,
-            },
+        context(
+            "ConnectRequest",
+            map(
+                tuple((Hpai::parse, Hpai::parse, Cri::parse)),
+                |(ctl, data, cri)| ConnectRequest {
+                    control_endpoint: ctl,
+                    data_endpoint: data,
+                    cri,
+                },
+            ),
         )(i)
     }
 

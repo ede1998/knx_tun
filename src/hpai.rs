@@ -3,6 +3,7 @@ use nom_derive::NomBE;
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[nom(GenericErrors)]
 #[repr(u8)]
 pub enum HostProtocolCode {
     Ipv4Udp = 0x01,
@@ -28,8 +29,12 @@ impl Hpai {
             address,
         }
     }
-    
-    pub fn new_from_parts<T: Into<Ipv4Addr>>(protocol_code: HostProtocolCode, ip: T, port: u16) -> Self {
+
+    pub fn new_from_parts<T: Into<Ipv4Addr>>(
+        protocol_code: HostProtocolCode,
+        ip: T,
+        port: u16,
+    ) -> Self {
         Self {
             protocol_code,
             address: SocketAddrV4::new(ip.into(), port),
@@ -48,13 +53,16 @@ impl Hpai {
         )
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
         use nm::*;
-        length_value_incl(
-            be_u8,
-            map(
-                tuple((HostProtocolCode::parse, be_u32, be_u16)),
-                |(code, ip, port)| Self::new(code, SocketAddrV4::new(ip.into(), port)),
+        context(
+            "HPAI",
+            length_value_incl(
+                be_u8,
+                map(
+                    tuple((HostProtocolCode::parse, be_u32, be_u16)),
+                    |(code, ip, port)| Self::new(code, SocketAddrV4::new(ip.into(), port)),
+                ),
             ),
         )(i)
     }

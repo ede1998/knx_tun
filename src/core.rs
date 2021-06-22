@@ -5,6 +5,7 @@ use nom_derive::NomBE;
 use crate::cri::ConnectRequest;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[nom(GenericErrors)]
 #[repr(u16)]
 pub enum ServiceType {
     SearchRequest = 0x0201,
@@ -32,6 +33,7 @@ impl From<ServiceType> for u16 {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[nom(GenericErrors)]
 #[repr(u8)]
 pub enum ProtocolVersion {
     V1_0 = 0x10,
@@ -61,14 +63,17 @@ impl Header {
 
     pub const LENGTH: u16 = 0x06;
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+    pub(crate) fn parse<'a>(i: &'a [u8]) -> IResult<'a, Self> {
         use nm::*;
-        let (i, inner) = length_data_incl(be_u8)(i)?;
-        let header_len = 1 + inner.len() as u16;
-        let (inner, _) = verify(ProtocolVersion::parse, |&p| p == ProtocolVersion::V1_0)(inner)?;
-        let (inner, service_type) = ServiceType::parse(inner)?;
-        let (_, body_length) = map(be_u16, |total_length| total_length - header_len)(inner)?;
-        Ok((i, Header::new(service_type, body_length)))
+        context("Header", |i: &'a [u8]| {
+            let (i, inner) = length_data_incl(be_u8)(i)?;
+            let header_len = 1 + inner.len() as u16;
+            let (inner, _) =
+                verify(ProtocolVersion::parse, |&p| p == ProtocolVersion::V1_0)(inner)?;
+            let (inner, service_type) = ServiceType::parse(inner)?;
+            let (_, body_length) = map(be_u16, |total_length| total_length - header_len)(inner)?;
+            Ok((i, Header::new(service_type, body_length)))
+        })(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
@@ -103,12 +108,12 @@ impl Body {
         }
     }
 
-    pub(crate) fn parse(i: &[u8], service_type: ServiceType) -> IResult<&[u8], Body> {
+    pub(crate) fn parse(i: &[u8], service_type: ServiceType) -> IResult<Body> {
         use nm::*;
-        match service_type {
+        context("Body", |i| match service_type {
             ServiceType::ConnectRequest => into(ConnectRequest::parse)(i),
-            _ => Err(Err::Error(make_error(i, ErrorKind::Switch))),
-        }
+            _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
+        })(i)
     }
 }
 
@@ -134,7 +139,7 @@ impl Frame {
         )
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Frame> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
         use nm::*;
         let (i, header) = Header::parse(i)?;
         let (i, inner) = take(header.body_length)(i)?;

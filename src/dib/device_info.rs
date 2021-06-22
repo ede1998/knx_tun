@@ -19,30 +19,32 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], DeviceInfo> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<DeviceInfo> {
         use nm::*;
-        let (i, knx_medium) = KnxMedium::parse(i)?;
-        let (i, device_status) = DeviceStatus::parse(i)?;
-        let (i, address) = Address::parse(i, AddressKind::Individual)?;
-        let (i, ident) = ProjectInstallationIdentifier::parse(i)?;
-        let (i, serial_number) = fixed_slice::<6>(i)?;
-        let (i, multicast_address): (_, Ipv4Addr) = into(be_u32::<_, NomError>)(i)?;
-        if !(multicast_address.is_multicast() || multicast_address.is_unspecified()) {
-            return Err(Err::Error(make_error(i, ErrorKind::Verify)));
-        }
-        let (i, mac_address) = into(fixed_slice::<6>)(i)?;
-        let (i, friendly_name) = StringBuffer::parse(i)?;
-        let info = DeviceInfo {
-            knx_medium,
-            device_status,
-            knx_individual_address: address,
-            project_installation_identifier: ident,
-            serial_number,
-            routing_multicast_address: multicast_address,
-            mac_address,
-            friendly_name,
-        };
-        Ok((i, info))
+        context("DeviceInfo", |i| {
+            let (i, knx_medium) = KnxMedium::parse(i)?;
+            let (i, device_status) = DeviceStatus::parse(i)?;
+            let (i, address) = Address::parse(i, AddressKind::Individual)?;
+            let (i, ident) = ProjectInstallationIdentifier::parse(i)?;
+            let (i, serial_number) = fixed_slice::<6>(i)?;
+            let (i, multicast_address): (_, Ipv4Addr) = into(be_u32::<_, VerboseError>)(i)?;
+            if !(multicast_address.is_multicast() || multicast_address.is_unspecified()) {
+                return Err(Err::Error(make_error(i, NomErrorKind::Verify)));
+            }
+            let (i, mac_address) = into(fixed_slice::<6>)(i)?;
+            let (i, friendly_name) = StringBuffer::parse("FriendlyName", i)?;
+            let info = DeviceInfo {
+                knx_medium,
+                device_status,
+                knx_individual_address: address,
+                project_installation_identifier: ident,
+                serial_number,
+                routing_multicast_address: multicast_address,
+                mac_address,
+                friendly_name,
+            };
+            Ok((i, info))
+        })(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
@@ -61,6 +63,7 @@ impl DeviceInfo {
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[nom(GenericErrors)]
 #[repr(u8)]
 pub enum KnxMedium {
     Tp1 = 0x02,
@@ -93,9 +96,9 @@ impl DeviceStatus {
         Self { programming_mode }
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], DeviceStatus> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<DeviceStatus> {
         use nm::*;
-        let (i, value) = be_u8(i)?;
+        let (i, value) = context("DeviceStatus", be_u8)(i)?;
         let mode = (value & Self::BITMASK_PROGRAMMING_MODE) != 0;
         Ok((i, DeviceStatus::new(mode)))
     }
@@ -114,6 +117,7 @@ impl DeviceStatus {
 /// Bits 15 to 4 project number
 /// Bits 3 to 0 installation number
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[nom(GenericErrors)]
 pub struct ProjectInstallationIdentifier(u16);
 
 impl ProjectInstallationIdentifier {
@@ -170,9 +174,9 @@ impl<const N: usize> StringBuffer<N> {
         s.chars().all(|c| c as u32 <= 0xFF)
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+    pub(crate) fn parse<'a>(ctx: &'static str, i: &'a [u8]) -> IResult<'a, Self> {
         use nm::*;
-        map(fixed_slice::<N>, Self)(i)
+        context(ctx, map(fixed_slice::<N>, Self))(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {

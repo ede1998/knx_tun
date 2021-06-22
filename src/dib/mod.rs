@@ -9,6 +9,7 @@ use device_info::DeviceInfo;
 use service_family::ServiceFamily;
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[nom(GenericErrors)]
 #[repr(u8)]
 pub enum DescriptionType {
     /// Device information e.g. KNX medium.
@@ -60,16 +61,19 @@ impl From<Vec<ServiceFamily>> for Dib {
 }
 
 impl Dib {
-    pub(crate) fn parse(i: &[u8]) -> IResult<&[u8], Self> {
+    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
         use nm::*;
-        length_value_incl(be_u8, |i| {
-            let (i, con_type) = dbg!(DescriptionType::parse(i))?;
-            match con_type {
-                DescriptionType::DeviceInfo => into(DeviceInfo::parse)(i),
-                DescriptionType::SuppSvcFamilies => dbg!(into(many0(ServiceFamily::parse))(i)),
-                _ => unimplemented!(),
-            }
-        })(i)
+        context(
+            "DIB",
+            length_value_incl(be_u8, |i| {
+                let (i, con_type) = dbg!(DescriptionType::parse(i))?;
+                match con_type {
+                    DescriptionType::DeviceInfo => into(DeviceInfo::parse)(i),
+                    // DescriptionType::SuppSvcFamilies => dbg!(into(many0(ServiceFamily::parse))(i)),
+                    _ => unimplemented!(),
+                }
+            }),
+        )(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {

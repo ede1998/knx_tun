@@ -1,9 +1,8 @@
-
-pub mod hpai;
+pub mod address;
 pub mod core;
 pub mod cri;
 pub mod dib;
-pub mod address;
+pub mod hpai;
 mod snack;
 
 #[cfg(test)]
