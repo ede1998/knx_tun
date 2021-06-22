@@ -120,7 +120,8 @@ mod tests {
 
     #[test]
     fn parse_empty_dib() {
-        let (rem, actual) = Dib::parse(&[2, 2, 1, 1]).unwrap();
+        let result = Dib::parse(&[2, 2, 1, 1]);
+        let (rem, actual) = result.unwrap();
 
         assert_eq!(0, rem.len());
         assert_eq!(Dib::SupportedServiceFamilies(Vec::new()), actual);

@@ -1,6 +1,6 @@
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 
-fn main(){}
+fn main() {}
 // use knx_tun::{*, cri::{ConnectRequest, ConnectionRequestInformation, KnxLayer}, frame::{Body, Frame}, header::{Header, ServiceType}, hpai::HostProtocolAddressInformation};
 
 // const PORT: u16 = 3671;

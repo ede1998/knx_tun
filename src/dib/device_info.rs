@@ -27,7 +27,7 @@ impl DeviceInfo {
             let (i, address) = Address::parse(i, AddressKind::Individual)?;
             let (i, ident) = ProjectInstallationIdentifier::parse(i)?;
             let (i, serial_number) = fixed_slice::<6>(i)?;
-            let (i, multicast_address): (_, Ipv4Addr) = into(be_u32::<_, VerboseError>)(i)?;
+            let (i, multicast_address): (_, Ipv4Addr) = into(be_u32::<_, Error<In>>)(i)?;
             if !(multicast_address.is_multicast() || multicast_address.is_unspecified()) {
                 return Err(Err::Error(make_error(i, NomErrorKind::Verify)));
             }
