@@ -12,7 +12,7 @@ pub mod nm {
     pub use nom::combinator::{into, map, verify};
     pub use nom::error::ParseError;
     pub use nom::error::{make_error, ErrorKind};
-    pub use nom::multi::{length_data, length_value};
+    pub use nom::multi::{length_data, length_value, many0};
     pub use nom::number::complete::*;
     pub use nom::sequence::tuple;
     pub use nom::{Err, Parser};
@@ -20,6 +20,8 @@ pub mod nm {
 
     use nom::combinator::map_opt;
     use nom::{IResult, InputLength, InputTake, ToUsize};
+
+    pub type NomError<'a> = nom::error::Error<&'a [u8]>;
 
     /// Wraps `length_data`. Gets a number N from the parser and returns a
     /// subslice of the input of that size. Differs from `length_data` because
@@ -75,6 +77,7 @@ pub mod nm {
 pub mod cf {
     pub use cookie_factory::bytes::*;
     pub use cookie_factory::combinator::{back_to_the_buffer, slice};
+    pub use cookie_factory::multi::all;
     pub use cookie_factory::sequence::tuple;
     pub use cookie_factory::{gen, gen_simple, WriteContext};
 

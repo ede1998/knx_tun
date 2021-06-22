@@ -1,4 +1,4 @@
-use nom::{number::streaming::be_u16, IResult};
+use crate::snack::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum AddressKind {
@@ -14,6 +14,14 @@ pub struct Address {
 }
 
 impl Address {
+    pub const fn new(kind: AddressKind, subnet: u8, device: u8) -> Self {
+        Self {
+            kind,
+            subnet,
+            device,
+        }
+    }
+
     pub fn area(&self) -> u8 {
         self.subnet >> 4
     }
@@ -25,22 +33,60 @@ impl Address {
     pub fn device(&self) -> u8 {
         self.device
     }
-}
 
-impl From<Address> for u16 {
-    fn from(addr: Address) -> Self {
-        let Address { subnet, device, .. } = addr;
-        u16::from_be_bytes([subnet, device])
+    pub(crate) fn parse(i: &[u8], kind: AddressKind) -> IResult<&[u8], Self> {
+        use nm::*;
+        let (i, (subnet, device)) = tuple((be_u8, be_u8))(i)?;
+        let addr = Address {
+            kind,
+            device,
+            subnet,
+        };
+        Ok((i, addr))
+    }
+
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        tuple((be_u8(self.subnet), be_u8(self.device)))
     }
 }
 
-pub(crate) fn parse_address(i: &[u8], kind: AddressKind) -> IResult<&[u8], Address> {
-    let (i, value) = be_u16(i)?;
-    let [subnet, device] = value.to_be_bytes();
-    let addr = Address {
-        kind,
-        device,
-        subnet,
-    };
-    Ok((i, addr))
+impl std::fmt::Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sep = match self.kind {
+            AddressKind::Group => '/',
+            AddressKind::Individual => '.',
+        };
+        write!(
+            f,
+            "{}{sep}{}{sep}{}",
+            self.area(),
+            self.line(),
+            self.device(),
+            sep = sep
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_DATA_ADDRESS: [u8; 2] = [0x11, 0x0C];
+    const TEST_ADDRESS: Address = Address::new(AddressKind::Individual, 0x11, 0x0C);
+
+    #[test]
+    fn parse_address() {
+        let (rem, actual) = Address::parse(&TEST_DATA_ADDRESS, AddressKind::Individual).unwrap();
+
+        assert_eq!(0, rem.len());
+        assert_eq!(TEST_ADDRESS, actual);
+    }
+
+    #[test]
+    fn gen_address() {
+        let (actual, len) = cookie_factory::gen(TEST_ADDRESS.gen(), vec![]).unwrap();
+        assert_eq!(len, TEST_DATA_ADDRESS.len() as u64);
+        assert_eq!(&TEST_DATA_ADDRESS[..], &actual[..]);
+    }
 }
