@@ -207,20 +207,23 @@ pub mod nm {
     /// ```
     pub fn all0<I, O, E, F>(mut f: F) -> impl FnMut(I) -> IResult<I, Vec<O>, E>
     where
-        I: InputLength + PartialEq + Clone,
+        I: InputLength,
         F: Parser<I, O, E>,
         E: NomParseError<I>,
     {
         move |mut i: I| {
             let mut acc = Vec::with_capacity(4);
-            while i.input_len() > 0 {
-                match f.parse(i.clone()) {
+            let mut old_len = i.input_len();
+            while old_len > 0 {
+                match f.parse(i) {
                     Ok((inner, o)) => {
-                        if i == inner {
-                            return Err(Err::Error(E::from_error_kind(i, NomErrorKind::Many0)));
+                        let new_len = inner.input_len();
+                        if new_len == old_len {
+                            return Err(Err::Error(E::from_error_kind(inner, NomErrorKind::Many0)));
                         }
                         acc.push(o);
                         i = inner;
+                        old_len = new_len;
                     }
                     Err(e) => return Err(e),
                 }
