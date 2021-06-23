@@ -1,29 +1,33 @@
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 
-fn main() {}
-// use knx_tun::{*, cri::{ConnectRequest, ConnectionRequestInformation, KnxLayer}, frame::{Body, Frame}, header::{Header, ServiceType}, hpai::HostProtocolAddressInformation};
+use knx_tun::{core::*, cri::*, hpai::*};
 
-// const PORT: u16 = 3671;
+const PORT: u16 = 3671;
 
-// fn main() -> std::io::Result<()> {
-//     println!("Test");
-//     let target = SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT);
-//     let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0);
-//     let socket = UdpSocket::bind(source)?;
-//     socket.connect(target)?;
+fn main() -> std::io::Result<()> {
+    println!("Test");
+    let target = SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT);
+    let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 51232);
+    let socket = UdpSocket::bind(source)?;
+    socket.connect(target)?;
 
-//     let mut header = Header::new(ServiceType::ConnectRequest,0);
+    let connect_request = ConnectRequest::new(
+        Hpai::new(HostProtocolCode::Ipv4Udp, source),
+        Hpai::new(HostProtocolCode::Ipv4Udp, source),
+        Cri::new_tunnel(KnxLayer::BusMonitor),
+    );
+    let body = connect_request.into();
+    let mut frame = Frame::wrap(body);
+    frame.header.body_length = 20;
 
-//         control_endpoint: HostProtocolAddressInformation::new(hpai::HostProtocolCode::Ipv4Udp, source),
-//         data_endpoint: HostProtocolAddressInformation::new(hpai::HostProtocolCode::Ipv4Udp, source),
-//         cri: ConnectionRequestInformation::Tunnel(KnxLayer::BusMonitor),
-//     };
-//     let body = Body::ConnectRequest(request);
-//     // header.set_body_len(body.len());
-//     let frame = Frame::new(header, body);
+    let (data, len) = cookie_factory::gen(frame.gen(), vec![]).unwrap();
+    socket.send(&data)?;
 
-//     let data = frame.serialize();
-//     socket.send(&data)?;
+    let mut buf = [0; 100];
 
-//     Ok(())
-// }
+    let (len, addr) = socket.recv_from(&mut buf).expect("Could not receive data.");
+    println!("Received {} bytes from {}.", len, addr);
+    let (remainder, datagram) = Frame::parse(&buf[..len]).expect("Parsing error.");
+
+    Ok(())
+}

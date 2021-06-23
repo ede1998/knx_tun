@@ -103,17 +103,20 @@ impl Body {
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        match self {
-            Body::ConnectRequest(m) => be_u16(0),
+        move |buf| match self {
+            Body::ConnectRequest(m) => m.gen()(buf),
         }
     }
 
     pub(crate) fn parse(i: &[u8], service_type: ServiceType) -> IResult<Body> {
         use nm::*;
-        context("Body", |i| match service_type {
-            ServiceType::ConnectRequest => into(ConnectRequest::parse)(i),
-            _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
-        })(i)
+        context(
+            "Body",
+            all_consuming(|i| match service_type {
+                ServiceType::ConnectRequest => into(ConnectRequest::parse)(i),
+                _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
+            }),
+        )(i)
     }
 }
 
@@ -129,7 +132,7 @@ impl Frame {
         Self { header, body }
     }
 
-    pub(crate) fn gen<'a, W: BackToTheBuffer + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+    pub fn gen<'a, W: BackToTheBuffer + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
         // TODO header length field must be set correctly
         back_to_the_buffer(
@@ -139,7 +142,7 @@ impl Frame {
         )
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
+    pub fn parse(i: &[u8]) -> IResult<Self> {
         use nm::*;
         let (i, header) = Header::parse(i)?;
         let (i, inner) = take(header.body_length)(i)?;
