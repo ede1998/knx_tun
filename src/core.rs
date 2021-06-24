@@ -149,7 +149,7 @@ impl Frame {
         use nm::*;
         let (i, header) = Header::parse(i)?;
         let (i, inner) = take(header.body_length)(i)?;
-        let (inner, body) = Body::parse(inner, header.service_type)?;
+        let (_, body) = Body::parse(inner, header.service_type)?;
         Ok((i, Frame { header, body }))
     }
 }

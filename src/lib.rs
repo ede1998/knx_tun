@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod address;
 pub mod connect;
 pub mod core;
