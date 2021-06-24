@@ -2,7 +2,7 @@ use crate::snack::*;
 use cookie_factory::BackToTheBuffer;
 use nom_derive::NomBE;
 
-use crate::cri::ConnectRequest;
+use crate::connect::{ConnectRequest, ConnectResponse};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[nom(GenericErrors)]
@@ -92,19 +92,21 @@ impl Header {
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum Body {
     ConnectRequest(ConnectRequest),
+    ConnectResponse(ConnectResponse),
 }
 
 impl Body {
     fn as_service_type(&self) -> ServiceType {
         match self {
             Self::ConnectRequest(_) => ServiceType::ConnectRequest,
+            Self::ConnectResponse(_) => ServiceType::ConnectResponse,
         }
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
-        use cf::*;
         move |buf| match self {
             Body::ConnectRequest(m) => m.gen()(buf),
+            Body::ConnectResponse(m) => m.gen()(buf),
         }
     }
 
@@ -114,6 +116,7 @@ impl Body {
             "Body",
             all_consuming(|i| match service_type {
                 ServiceType::ConnectRequest => into(ConnectRequest::parse)(i),
+                ServiceType::ConnectResponse => into(ConnectResponse::parse)(i),
                 _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
             }),
         )(i)

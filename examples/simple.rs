@@ -1,6 +1,6 @@
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 
-use knx_tun::{core::*, cri::*, hpai::*};
+use knx_tun::{connect::*, core::*, hpai::*};
 
 const PORT: u16 = 3671;
 
@@ -28,6 +28,7 @@ fn main() -> std::io::Result<()> {
     let (len, addr) = socket.recv_from(&mut buf).expect("Could not receive data.");
     println!("Received {} bytes from {}.", len, addr);
     let (remainder, datagram) = Frame::parse(&buf[..len]).expect("Parsing error.");
+    println!("Parsed {:#?}.", datagram);
 
     Ok(())
 }

@@ -1,6 +1,6 @@
 pub mod address;
+pub mod connect;
 pub mod core;
-pub mod cri;
 pub mod dib;
 pub mod hpai;
 pub mod snack;
