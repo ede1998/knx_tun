@@ -319,13 +319,13 @@ mod tests {
     use super::*;
     use crate::hpai::HostProtocolCode;
 
-    const TEST_DATA_CR: [u8; 20] = [
+    const TEST_DATA_CREQUEST: [u8; 20] = [
         0x08, 0x01, 192, 168, 200, 12, 0xC3, 0xB4, // ctrl hpai
         0x08, 0x01, 192, 168, 200, 20, 0xC3, 0xB5, // data hpai
         0x04, 0x04, 0x02, 0x00, // cri
     ];
 
-    fn make_test_cr() -> ConnectRequest {
+    fn make_test_crequest() -> ConnectRequest {
         ConnectRequest::new(
             Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 12], 50100),
             Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 20], 50101),
@@ -335,18 +335,55 @@ mod tests {
 
     #[test]
     fn parse_connect_request() {
-        let (rem, actual) = ConnectRequest::parse(&TEST_DATA_CR).unwrap();
+        let (rem, actual) = ConnectRequest::parse(&TEST_DATA_CREQUEST).unwrap();
 
         assert_eq!(0, rem.len());
-        let expected = make_test_cr();
+        let expected = make_test_crequest();
         assert_eq!(expected, actual);
     }
 
     #[test]
     fn gen_connect_request() {
-        let to_serialize = make_test_cr();
+        let to_serialize = make_test_crequest();
         let (actual, len) = cookie_factory::gen(to_serialize.gen(), vec![]).unwrap();
-        assert_eq!(len, TEST_DATA_CR.len() as u64);
-        assert_eq!(&TEST_DATA_CR[..], &actual[..]);
+        assert_eq!(len, TEST_DATA_CREQUEST.len() as u64);
+        assert_eq!(&TEST_DATA_CREQUEST[..], &actual[..]);
+    }
+
+    const TEST_DATA_CRESPONSE: [u8; 14] = [
+        0x15, // communication channel
+        0x00, // status code
+        0x08, 0x01, 192, 168, 200, 20, 0xC3, 0xB4, // hpai
+        0x04, 0x04, 0x11, 0x0A, // crd
+    ];
+
+    fn make_test_cresponse() -> ConnectResponse {
+        ConnectResponse::new(
+            0x15,
+            ConnectResponseState::NoError,
+            Hpai::new_from_parts(HostProtocolCode::Ipv4Udp, [192, 168, 200, 20], 50100),
+            Crd::new_tunnel(Address::new(
+                crate::address::AddressKind::Individual,
+                0x11,
+                0xA,
+            )),
+        )
+    }
+
+    #[test]
+    fn parse_connect_response() {
+        let (rem, actual) = ConnectResponse::parse(&TEST_DATA_CRESPONSE).unwrap();
+
+        assert_eq!(0, rem.len());
+        let expected = make_test_cresponse();
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn gen_connect_response() {
+        let to_serialize = make_test_cresponse();
+        let (actual, len) = cookie_factory::gen(to_serialize.gen(), vec![]).unwrap();
+        assert_eq!(len, TEST_DATA_CRESPONSE.len() as u64);
+        assert_eq!(&TEST_DATA_CRESPONSE[..], &actual[..]);
     }
 }

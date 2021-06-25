@@ -66,8 +66,8 @@ impl Dib {
         context(
             "DIB",
             length_value_incl(be_u8, |i| {
-                let (i, con_type) = DescriptionType::parse(i)?;
-                match con_type {
+                let (i, desc_type) = DescriptionType::parse(i)?;
+                match desc_type {
                     DescriptionType::DeviceInfo => into(DeviceInfo::parse)(i),
                     DescriptionType::SuppSvcFamilies => into(all0(ServiceFamily::parse))(i),
                     _ => unimplemented!(),
