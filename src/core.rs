@@ -1,4 +1,4 @@
-use crate::snack::*;
+use crate::{disconnect::*, snack::*};
 use cookie_factory::BackToTheBuffer;
 use nom_derive::NomBE;
 
@@ -93,6 +93,8 @@ impl Header {
 pub enum Body {
     ConnectRequest(ConnectRequest),
     ConnectResponse(ConnectResponse),
+    DisconnectRequest(DisconnectRequest),
+    DisconnectResponse(DisconnectResponse),
 }
 
 impl Body {
@@ -100,6 +102,8 @@ impl Body {
         match self {
             Self::ConnectRequest(_) => ServiceType::ConnectRequest,
             Self::ConnectResponse(_) => ServiceType::ConnectResponse,
+            Self::DisconnectRequest(_) => ServiceType::DisconnectRequest,
+            Self::DisconnectResponse(_) => ServiceType::DisconnectResponse,
         }
     }
 
@@ -107,6 +111,8 @@ impl Body {
         move |buf| match self {
             Body::ConnectRequest(m) => m.gen()(buf),
             Body::ConnectResponse(m) => m.gen()(buf),
+            Body::DisconnectRequest(m) => m.gen()(buf),
+            Body::DisconnectResponse(m) => m.gen()(buf),
         }
     }
 
@@ -117,6 +123,8 @@ impl Body {
             all_consuming(|i| match service_type {
                 ServiceType::ConnectRequest => into(ConnectRequest::parse)(i),
                 ServiceType::ConnectResponse => into(ConnectResponse::parse)(i),
+                ServiceType::DisconnectRequest => into(DisconnectRequest::parse)(i),
+                ServiceType::DisconnectResponse => into(DisconnectResponse::parse)(i),
                 _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
             }),
         )(i)

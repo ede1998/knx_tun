@@ -4,6 +4,7 @@ pub mod address;
 pub mod connect;
 pub mod core;
 pub mod dib;
+pub mod disconnect;
 pub mod hpai;
 pub mod snack;
 
