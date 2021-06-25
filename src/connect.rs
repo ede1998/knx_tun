@@ -204,11 +204,13 @@ impl ConnectResponse {
 
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
-        let (i, channel_id) = be_u8(i)?;
-        let (i, state) = ConnectResponseState::parse(i)?;
-        let (i, hpai) = Hpai::parse(i)?;
-        let (i, crd) = Crd::parse(i)?;
-        Ok((i, Self::new(channel_id, state, hpai, crd)))
+        context("ConnectResponse", |i| {
+            let (i, channel_id) = be_u8(i)?;
+            let (i, state) = ConnectResponseState::parse(i)?;
+            let (i, hpai) = Hpai::parse(i)?;
+            let (i, crd) = Crd::parse(i)?;
+            Ok((i, Self::new(channel_id, state, hpai, crd)))
+        })(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
@@ -275,13 +277,16 @@ impl Crd {
 
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
-        length_value_incl(be_u8, |i| {
-            let (i, connection_type) = ConnectionTypeCode::parse(i)?;
-            match connection_type {
-                ConnectionTypeCode::Tunnel => into(TunnelResponse::parse)(i),
-                _ => unimplemented!(),
-            }
-        })(i)
+        context(
+            "Crd",
+            length_value_incl(be_u8, |i| {
+                let (i, connection_type) = ConnectionTypeCode::parse(i)?;
+                match connection_type {
+                    ConnectionTypeCode::Tunnel => into(TunnelResponse::parse)(i),
+                    _ => unimplemented!(),
+                }
+            }),
+        )(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
@@ -305,8 +310,11 @@ impl TunnelResponse {
         }
     }
     pub(crate) fn parse(i: In) -> IResult<Self> {
-        let (i, addr) = Address::parse(i, crate::address::AddressKind::Individual)?;
-        Ok((i, Self::new(addr)))
+        use nm::*;
+        context("CRD-Tunnel", |i| {
+            let (i, addr) = Address::parse(i, crate::address::AddressKind::Individual)?;
+            Ok((i, Self::new(addr)))
+        })(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
