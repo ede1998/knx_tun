@@ -181,10 +181,10 @@ impl ConnectionTypeCode {
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct ConnectResponse {
-    communication_channel_id: u8,
-    state: ConnectResponseState,
-    data_endpoint: Hpai,
-    crd: Crd,
+    pub communication_channel_id: u8,
+    pub state: ConnectResponseState,
+    pub data_endpoint: Hpai,
+    pub crd: Crd,
 }
 
 impl ConnectResponse {
