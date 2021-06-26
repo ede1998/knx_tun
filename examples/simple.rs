@@ -1,6 +1,8 @@
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 
-use knx_tun::{connect::*, core::*, disconnect::DisconnectRequest, hpai::*};
+use knx_tun::{
+    connect::*, core::*, disconnect::DisconnectRequest, hpai::*, keep_alive::ConnectionStateRequest,
+};
 
 const PORT: u16 = 3671;
 
@@ -67,6 +69,21 @@ fn main() -> std::io::Result<()> {
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
     println!("Received connect response.");
+
+    let state_request = ConnectionStateRequest::new(
+        connect_response.communication_channel_id,
+        socket_wrapper.control_ep.clone(),
+    );
+
+    socket_wrapper.send_frame(state_request, 4)?;
+    println!("Sent connection state request.");
+
+    let datagram = socket_wrapper.receive_frame()?;
+    let state_response = match datagram.body {
+        Body::ConnectionStateResponse(r) => r,
+        b => panic!("Telegram of unexpected type {:#?}", b),
+    };
+    println!("Received connection state response.");
 
     let disconnect_request = DisconnectRequest::new(
         connect_response.communication_channel_id,
