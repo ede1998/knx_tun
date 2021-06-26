@@ -1,8 +1,10 @@
-use crate::{disconnect::*, snack::*};
 use cookie_factory::BackToTheBuffer;
 use nom_derive::NomBE;
 
 use crate::connect::{ConnectRequest, ConnectResponse};
+use crate::disconnect::{DisconnectRequest, DisconnectResponse};
+use crate::keep_alive::{ConnectionStateRequest, ConnectionStateResponse};
+use crate::snack::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[nom(GenericErrors)]
@@ -14,8 +16,8 @@ pub enum ServiceType {
     DescriptionResponse = 0x0204,
     ConnectRequest = 0x0205,
     ConnectResponse = 0x0206,
-    ConnectionstateRequest = 0x0207,
-    ConnectionstateResponse = 0x0208,
+    ConnectionStateRequest = 0x0207,
+    ConnectionStateResponse = 0x0208,
     DisconnectRequest = 0x0209,
     DisconnectResponse = 0x020A,
     TunnelRequest = 0x0420,
@@ -95,6 +97,8 @@ pub enum Body {
     ConnectResponse(ConnectResponse),
     DisconnectRequest(DisconnectRequest),
     DisconnectResponse(DisconnectResponse),
+    ConnectionStateRequest(ConnectionStateRequest),
+    ConnectionStateResponse(ConnectionStateResponse),
 }
 
 impl Body {
@@ -104,6 +108,8 @@ impl Body {
             Self::ConnectResponse(_) => ServiceType::ConnectResponse,
             Self::DisconnectRequest(_) => ServiceType::DisconnectRequest,
             Self::DisconnectResponse(_) => ServiceType::DisconnectResponse,
+            Self::ConnectionStateRequest(_) => ServiceType::ConnectionStateRequest,
+            Self::ConnectionStateResponse(_) => ServiceType::ConnectionStateResponse,
         }
     }
 
@@ -113,6 +119,8 @@ impl Body {
             Body::ConnectResponse(m) => m.gen()(buf),
             Body::DisconnectRequest(m) => m.gen()(buf),
             Body::DisconnectResponse(m) => m.gen()(buf),
+            Body::ConnectionStateRequest(m) => m.gen()(buf),
+            Body::ConnectionStateResponse(m) => m.gen()(buf),
         }
     }
 
@@ -125,6 +133,8 @@ impl Body {
                 ServiceType::ConnectResponse => into(ConnectResponse::parse)(i),
                 ServiceType::DisconnectRequest => into(DisconnectRequest::parse)(i),
                 ServiceType::DisconnectResponse => into(DisconnectResponse::parse)(i),
+                ServiceType::ConnectionStateRequest => into(ConnectionStateRequest::parse)(i),
+                ServiceType::ConnectionStateResponse => into(ConnectionStateResponse::parse)(i),
                 _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
             }),
         )(i)

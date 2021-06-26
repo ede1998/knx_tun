@@ -102,7 +102,7 @@ mod tests {
     use crate::hpai::HostProtocolCode;
 
     const TEST_DATA_DREQUEST: [u8; 10] = [
-        0x15, // communcation channel
+        0x15, // communication channel
         0x00, // reserved
         0x08, 0x01, 192, 168, 200, 12, 0xC3, 0xB4, // hpai
     ];

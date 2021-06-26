@@ -6,6 +6,7 @@ pub mod core;
 pub mod dib;
 pub mod disconnect;
 pub mod hpai;
+pub mod keep_alive;
 pub mod snack;
 
 #[cfg(test)]
