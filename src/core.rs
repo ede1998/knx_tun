@@ -48,7 +48,7 @@ impl From<ProtocolVersion> for u8 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Header {
+struct Header {
     pub version: ProtocolVersion,
     pub service_type: ServiceType,
     pub body_length: u16,
@@ -63,11 +63,11 @@ impl Header {
         }
     }
 
-    pub const LENGTH: u16 = 0x06;
+    const LENGTH: u16 = 0x06;
 
     pub(crate) fn parse<'a>(i: &'a [u8]) -> IResult<'a, Self> {
         use nm::*;
-        context("Header", |i: &'a [u8]| {
+        context(stringify!(Header), |i: &'a [u8]| {
             let (i, inner) = length_data_incl(be_u8)(i)?;
             let header_len = 1 + inner.len() as u16;
             let (inner, _) =
@@ -143,23 +143,25 @@ impl Body {
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Frame {
-    pub header: Header,
     pub body: Body,
 }
 
 impl Frame {
     pub fn wrap(body: Body) -> Self {
-        let header = Header::new(body.as_service_type(), 0);
-        Self { header, body }
+        Self { body }
     }
 
     pub fn gen<'a, W: BackToTheBuffer + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        // TODO header length field must be set correctly
         back_to_the_buffer(
             Header::LENGTH as usize,
             move |buf: WriteContext<W>| gen(self.body.gen(), buf),
-            move |buf, _| gen_simple(self.header.gen(), buf),
+            move |buf, len| {
+                gen_simple(
+                    Header::new(self.body.as_service_type(), len as u16).gen(),
+                    buf,
+                )
+            },
         )
     }
 
@@ -168,7 +170,7 @@ impl Frame {
         let (i, header) = Header::parse(i)?;
         let (i, inner) = take(header.body_length)(i)?;
         let (_, body) = Body::parse(inner, header.service_type)?;
-        Ok((i, Frame { header, body }))
+        Ok((i, Frame { body }))
     }
 }
 

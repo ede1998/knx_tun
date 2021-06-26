@@ -27,10 +27,9 @@ impl SocketWrapper {
         })
     }
 
-    fn send_frame(&self, data: impl Into<Body>, len: u16) -> std::io::Result<()> {
+    fn send_frame(&self, data: impl Into<Body>) -> std::io::Result<()> {
         let body = data.into();
         let mut frame = Frame::wrap(body);
-        frame.header.body_length = len;
         let (data, len) = cookie_factory::gen(frame.gen(), vec![]).unwrap();
         self.socket.send(&data)?;
         println!("Sent data {:#?}.", data);
@@ -59,7 +58,7 @@ fn main() -> std::io::Result<()> {
         socket_wrapper.data_ep.clone(),
         Cri::new_tunnel(KnxLayer::BusMonitor),
     );
-    socket_wrapper.send_frame(connect_request, 20)?;
+    socket_wrapper.send_frame(connect_request)?;
     println!("Sent connect request.");
 
     let datagram = socket_wrapper.receive_frame()?;
@@ -75,7 +74,7 @@ fn main() -> std::io::Result<()> {
         socket_wrapper.control_ep.clone(),
     );
 
-    socket_wrapper.send_frame(state_request, 4)?;
+    socket_wrapper.send_frame(state_request)?;
     println!("Sent connection state request.");
 
     let datagram = socket_wrapper.receive_frame()?;
@@ -89,7 +88,7 @@ fn main() -> std::io::Result<()> {
         connect_response.communication_channel_id,
         socket_wrapper.control_ep.clone(),
     );
-    socket_wrapper.send_frame(disconnect_request, 4)?;
+    socket_wrapper.send_frame(disconnect_request)?;
     println!("Sent disconnect request.");
 
     let datagram = socket_wrapper.receive_frame()?;
