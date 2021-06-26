@@ -8,6 +8,7 @@ pub mod disconnect;
 pub mod hpai;
 pub mod keep_alive;
 pub mod snack;
+pub mod tunneling;
 
 #[cfg(test)]
 mod tests {

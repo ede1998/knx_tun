@@ -11,7 +11,7 @@ pub type In<'a> = &'a [u8];
 pub mod nm {
     pub use nom::branch::alt;
     pub use nom::bytes::complete::{tag, take};
-    pub use nom::combinator::{all_consuming, into, map, verify};
+    pub use nom::combinator::{all_consuming, into, map, map_res, verify};
     pub use nom::error::{
         context, make_error, ContextError as NomContextError, Error as NomError,
         ErrorKind as NomErrorKind, ParseError as NomParseError, VerboseError,
