@@ -19,7 +19,7 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    pub(crate) fn parse(i: &[u8]) -> IResult<DeviceInfo> {
+    pub(crate) fn parse(i: In) -> IResult<DeviceInfo> {
         use nm::*;
         context("DeviceInfo", |i| {
             let (i, knx_medium) = KnxMedium::parse(i)?;
@@ -96,7 +96,7 @@ impl DeviceStatus {
         Self { programming_mode }
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<DeviceStatus> {
+    pub(crate) fn parse(i: In) -> IResult<DeviceStatus> {
         use nm::*;
         let (i, value) = context("DeviceStatus", be_u8)(i)?;
         let mode = (value & Self::BITMASK_PROGRAMMING_MODE) != 0;
@@ -174,7 +174,7 @@ impl<const N: usize> StringBuffer<N> {
         s.chars().all(|c| c as u32 <= 0xFF)
     }
 
-    pub(crate) fn parse<'a>(ctx: &'static str, i: &'a [u8]) -> IResult<'a, Self> {
+    pub(crate) fn parse<'a>(ctx: &'static str, i: In<'a>) -> IResult<'a, Self> {
         use nm::*;
         context(ctx, map(fixed_slice::<N>, Self))(i)
     }

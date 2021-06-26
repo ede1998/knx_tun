@@ -61,7 +61,7 @@ impl From<Vec<ServiceFamily>> for Dib {
 }
 
 impl Dib {
-    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
             "DIB",

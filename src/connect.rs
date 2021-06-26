@@ -49,7 +49,7 @@ impl Cri {
         Self::Tunnel(TunnelRequest { layer })
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context("ConnectRequestInformation", into(TunnelRequest::parse))(i)
         // alt((
@@ -73,7 +73,7 @@ pub struct TunnelRequest {
 
 impl TunnelRequest {
     make_tag! {0x04, u8}
-    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
             "CRI-Tunnel",
@@ -126,7 +126,7 @@ impl ConnectRequest {
         }
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
             "ConnectRequest",

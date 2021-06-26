@@ -53,7 +53,7 @@ impl Hpai {
         )
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
             "HPAI",

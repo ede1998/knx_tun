@@ -22,6 +22,7 @@ pub mod nm {
     pub use nom::{Err, Parser};
     pub use nom_derive::Parse;
 
+    use super::In;
     use nom::combinator::map_opt;
     use nom::{IResult, InputLength, InputTake, ToUsize};
     use std::fmt;
@@ -55,7 +56,7 @@ pub mod nm {
         }
     }
 
-    impl<'a> fmt::Debug for Error<&'a [u8]> {
+    impl<'a> fmt::Debug for Error<In<'a>> {
         /// Algorithm copied from https://fasterthanli.me/series/making-our-own-ping/part-9
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(f, "/!\\ parsing error\n")?;
@@ -71,7 +72,7 @@ pub mod nm {
             // some data before, some data after, and highlight which part
             // we're talking about with tildes.
             let print_slice =
-                |f: &mut fmt::Formatter, s: &[u8], offset: usize, len: usize| -> fmt::Result {
+                |f: &mut fmt::Formatter, s: In, offset: usize, len: usize| -> fmt::Result {
                     // decide which part of `s` we're going to show.
                     let (s, offset, len) = {
                         // see diagram further in article.
@@ -233,7 +234,7 @@ pub mod nm {
     }
 
     /// Reads a fixed size array with `N` items from the input.
-    pub fn fixed_slice<const N: usize>(i: &[u8]) -> super::IResult<[u8; N]> {
+    pub fn fixed_slice<const N: usize>(i: In) -> super::IResult<[u8; N]> {
         if i.input_len() < N {
             return Err(Err::Error(make_error(i, NomErrorKind::Eof)));
         }

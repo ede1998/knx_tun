@@ -65,9 +65,9 @@ impl Header {
 
     const LENGTH: u16 = 0x06;
 
-    pub(crate) fn parse<'a>(i: &'a [u8]) -> IResult<'a, Self> {
+    pub(crate) fn parse<'a>(i: In<'a>) -> IResult<'a, Self> {
         use nm::*;
-        context(stringify!(Header), |i: &'a [u8]| {
+        context(stringify!(Header), |i: In<'a>| {
             let (i, inner) = length_data_incl(be_u8)(i)?;
             let header_len = 1 + inner.len() as u16;
             let (inner, _) =
@@ -124,7 +124,7 @@ impl Body {
         }
     }
 
-    pub(crate) fn parse(i: &[u8], service_type: ServiceType) -> IResult<Body> {
+    pub(crate) fn parse(i: In, service_type: ServiceType) -> IResult<Body> {
         use nm::*;
         context(
             "Body",
@@ -165,7 +165,7 @@ impl Frame {
         )
     }
 
-    pub fn parse(i: &[u8]) -> IResult<Self> {
+    pub fn parse(i: In) -> IResult<Self> {
         use nm::*;
         let (i, header) = Header::parse(i)?;
         let (i, inner) = take(header.body_length)(i)?;

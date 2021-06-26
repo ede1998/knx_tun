@@ -18,7 +18,7 @@ impl ServiceFamily {
         tuple((self.family_id.gen(), be_u8(self.version)))
     }
 
-    pub(crate) fn parse(i: &[u8]) -> IResult<Self> {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
             "ServiceFamily",
