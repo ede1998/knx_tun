@@ -59,7 +59,7 @@ pub mod nm {
     impl<'a> fmt::Debug for Error<In<'a>> {
         /// Algorithm copied from https://fasterthanli.me/series/making-our-own-ping/part-9
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            write!(f, "/!\\ parsing error\n")?;
+            writeln!(f, "/!\\ parsing error")?;
 
             let mut shown_input = None;
             let margin_left = 4;
@@ -96,7 +96,7 @@ pub mod nm {
                     for b in s {
                         write!(f, "{:02X} ", b)?;
                     }
-                    write!(f, "\n")?;
+                    writeln!(f)?;
 
                     write!(f, "{}", margin_str)?;
                     for i in 0..s.len() {
@@ -110,7 +110,7 @@ pub mod nm {
                             write!(f, "   ")?;
                         };
                     }
-                    write!(f, "\n")?;
+                    writeln!(f)?;
 
                     Ok(())
                 };
@@ -121,7 +121,7 @@ pub mod nm {
                     ErrorKind::Nom(err) => format!("nom error {:?}", err),
                 };
 
-                write!(f, "{}\n", prefix)?;
+                writeln!(f, "{}", prefix)?;
                 match shown_input {
                     None => {
                         shown_input.replace(input);

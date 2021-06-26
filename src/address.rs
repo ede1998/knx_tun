@@ -37,12 +37,7 @@ impl Address {
     pub(crate) fn parse(i: In, kind: AddressKind) -> IResult<Self> {
         use nm::*;
         let (i, (subnet, device)) = context("KNX address", tuple((be_u8, be_u8)))(i)?;
-        let addr = Address {
-            kind,
-            device,
-            subnet,
-        };
-        Ok((i, addr))
+        Ok((i, Self::new(kind, subnet, device)))
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
