@@ -2,12 +2,12 @@
 name = "knx_tun"
 version = "0.1.0"
 authors = ["ede1998 <online@erik-hennig.me>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nom = "6.2.1"
-nom-derive = "0.9.0"
+nom = "7.1.0"
+nom-derive = "0.10.0"
 cookie-factory = "0.3.2"
 mac_address = "1.1.1"
