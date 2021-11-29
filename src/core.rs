@@ -127,7 +127,7 @@ impl Body {
     pub(crate) fn parse(i: In, service_type: ServiceType) -> IResult<Body> {
         use nm::*;
         context(
-            "Body",
+            stringify!(Body),
             all_consuming(|i| match service_type {
                 ServiceType::ConnectRequest => into(ConnectRequest::parse)(i),
                 ServiceType::ConnectResponse => into(ConnectResponse::parse)(i),

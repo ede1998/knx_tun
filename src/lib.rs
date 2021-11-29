@@ -9,11 +9,4 @@ pub mod hpai;
 pub mod keep_alive;
 pub mod snack;
 pub mod tunneling;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+pub mod cemi;

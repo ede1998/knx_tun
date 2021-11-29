@@ -80,7 +80,7 @@ impl DisconnectResponse {
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
-            "DisconnectResponse",
+            stringify!(DisconnectResponse),
             map(tuple((be_u8, DisconnectState::parse)), |(chan, state)| {
                 Self::new(chan, state)
             }),
