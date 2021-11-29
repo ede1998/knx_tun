@@ -1,4 +1,6 @@
-use nom_derive::{NomBE, Parse};
+use std::{borrow::Cow, convert::TryFrom, marker::PhantomData};
+
+use nom_derive::NomBE;
 
 use crate::snack::*;
 
@@ -6,28 +8,33 @@ use crate::snack::*;
 pub struct ConnectionHeader<T> {
     pub communication_channel_id: u8,
     pub sequence_counter: u8,
-    pub data: T,
+    data: u8,
+    data_type: PhantomData<T>,
 }
 
 impl<T> ConnectionHeader<T> {
-    pub const fn new(communication_channel_id: u8, sequence_counter: u8, data: T) -> Self {
+    pub fn new(communication_channel_id: u8, sequence_counter: u8, data: T) -> Self
+    where
+        T: Into<u8>,
+    {
         Self {
             communication_channel_id,
             sequence_counter,
-            data,
+            data: data.into(),
+            data_type: Default::default(),
         }
     }
-    pub(crate) fn parse<'a>(i: In<'a>) -> IResult<'a, Self>
-    where
-        T: Parse<In<'a>, nm::Error<In<'a>>>,
-    {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
             stringify!(ConnectionHeader),
             length_value_incl(
                 be_u8,
-                map(tuple((be_u8, be_u8, T::parse)), |(chan, counter, data)| {
-                    Self::new(chan, counter, data)
+                map(tuple((be_u8, be_u8, be_u8)), |(chan, counter, data)| Self {
+                    communication_channel_id: chan,
+                    sequence_counter: counter,
+                    data,
+                    data_type: Default::default(),
                 }),
             ),
         )(i)
@@ -36,7 +43,6 @@ impl<T> ConnectionHeader<T> {
     pub(crate) fn gen<'a, W>(&'a self) -> impl SerializeFn<W> + 'a
     where
         W: Write + 'a,
-        T: Clone + Into<u8>,
     {
         use cf::*;
         length_data_incl(
@@ -44,39 +50,64 @@ impl<T> ConnectionHeader<T> {
             tuple((
                 be_u8(self.communication_channel_id),
                 be_u8(self.sequence_counter),
-                be_u8(self.data.clone().into()),
+                be_u8(self.data),
             )),
         )
+    }
+
+    pub fn data(&self) -> Result<T, u8>
+    where
+        T: TryFrom<u8>,
+    {
+        T::try_from(self.data).map_err(|_| self.data)
+    }
+}
+
+impl ConnectionHeader<()> {
+    pub fn reserved(communication_channel_id: u8, sequence_counter: u8) -> Self {
+        Self {
+            communication_channel_id,
+            sequence_counter,
+            data: 0,
+            data_type: Default::default(),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct TunnelingRequest {
-    pub header: ConnectionHeader<u8>,
-    pub cemi: u8,
+pub struct TunnelingRequest<'a> {
+    pub header: ConnectionHeader<()>,
+    pub cemi: Cow<'a, [u8]>,
 }
 
-impl TunnelingRequest {
-    pub const fn new(communication_channel_id: u8, sequence_counter: u8, cemi: u8) -> Self {
+impl<'a> TunnelingRequest<'a> {
+    pub fn new(
+        communication_channel_id: u8,
+        sequence_counter: u8,
+        cemi: Cow<'a, [u8]>,
+    ) -> Self {
         Self {
-            header: ConnectionHeader::new(communication_channel_id, sequence_counter, 0),
+            header: ConnectionHeader::reserved(communication_channel_id, sequence_counter),
             cemi,
         }
     }
 
-    pub(crate) fn parse(i: In) -> IResult<Self> {
+    pub(crate) fn parse(i: In<'a>) -> IResult<Self> {
         use nm::*;
         context(
             stringify!(TunnelingRequest),
-            map(tuple((ConnectionHeader::parse, be_u8)), |(header, cemi)| {
-                Self { header, cemi }
+            map(tuple((ConnectionHeader::parse, rest)), |(header, cemi)| {
+                Self {
+                    header,
+                    cemi: cemi.into(),
+                }
             }),
         )(i)
     }
 
-    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+    pub(crate) fn gen<W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        tuple((self.header.gen(), be_u8(self.cemi)))
+        tuple((self.header.gen(), slice(self.cemi.as_ref())))
     }
 }
 
@@ -98,7 +129,7 @@ impl From<TunnelingAckState> for u8 {
 pub struct TunnelingAck(pub ConnectionHeader<TunnelingAckState>);
 
 impl TunnelingAck {
-    pub const fn new(
+    pub fn new(
         communication_channel_id: u8,
         sequence_counter: u8,
         data: TunnelingAckState,
