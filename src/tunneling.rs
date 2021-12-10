@@ -81,11 +81,7 @@ pub struct TunnelingRequest<'a> {
 }
 
 impl<'a> TunnelingRequest<'a> {
-    pub fn new(
-        communication_channel_id: u8,
-        sequence_counter: u8,
-        cemi: Cow<'a, [u8]>,
-    ) -> Self {
+    pub fn new(communication_channel_id: u8, sequence_counter: u8, cemi: Cow<'a, [u8]>) -> Self {
         Self {
             header: ConnectionHeader::reserved(communication_channel_id, sequence_counter),
             cemi,

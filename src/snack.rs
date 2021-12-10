@@ -5,26 +5,29 @@ pub use cookie_factory::SerializeFn;
 pub use std::io::Write;
 
 pub type IResult<'a, O> = nom::IResult<In<'a>, O, nm::Error<In<'a>>>;
+pub type IBitResult<'a, O> = nom::IResult<(In<'a>, usize), O, nm::Error<(In<'a>, usize)>>;
 pub type In<'a> = &'a [u8];
 
 /// Nom specific re-exports and helpers
 pub mod nm {
+    pub use nom::bits::complete::{tag as bit_tag, take as bit_take};
     pub use nom::branch::alt;
     pub use nom::bytes::complete::{tag, take};
-    pub use nom::combinator::{all_consuming, into, map, map_res, verify, rest};
+    pub use nom::combinator::{all_consuming, eof, into, map, map_res, rest, verify};
     pub use nom::error::{
         context, make_error, ContextError as NomContextError, Error as NomError,
         ErrorKind as NomErrorKind, ParseError as NomParseError, VerboseError,
     };
     pub use nom::multi::{length_data, length_value, many0};
     pub use nom::number::complete::*;
-    pub use nom::sequence::tuple;
+    pub use nom::sequence::{pair, preceded, tuple};
     pub use nom::{Err, Parser};
     pub use nom_derive::Parse;
 
     use super::In;
     use nom::combinator::map_opt;
-    use nom::{IResult, InputLength, InputTake, ToUsize};
+    use nom::error::FromExternalError;
+    use nom::{ErrorConvert, IResult, InputLength, InputTake, ToUsize};
     use std::fmt;
 
     #[derive(Debug)]
@@ -141,6 +144,36 @@ pub mod nm {
         }
     }
 
+    impl<'a> ErrorConvert<Error<(In<'a>, usize)>> for Error<In<'a>> {
+        fn convert(self) -> Error<(In<'a>, usize)> {
+            Error {
+                errors: self
+                    .errors
+                    .into_iter()
+                    .map(|(pos, kind)| ((pos, 0), kind))
+                    .collect(),
+            }
+        }
+    }
+
+    impl<'a> ErrorConvert<Error<In<'a>>> for Error<(In<'a>, usize)> {
+        fn convert(self) -> Error<In<'a>> {
+            Error {
+                errors: self
+                    .errors
+                    .into_iter()
+                    .map(|(pos, kind)| (pos.0, kind))
+                    .collect(),
+            }
+        }
+    }
+
+    impl<'a, I> FromExternalError<I, ()> for Error<I> {
+        fn from_external_error(input: I, kind: NomErrorKind, _: ()) -> Self {
+            Self::from_error_kind(input, kind)
+        }
+    }
+
     /// Wraps `length_data`. Gets a number N from the parser and returns a
     /// subslice of the input of that size. Differs from `length_data` because
     /// the size of N itself is included in the value of N.
@@ -179,6 +212,23 @@ pub mod nm {
         )
     }
 
+    pub fn length_value_offset<I, O, N, E, F, G>(
+        f: F,
+        offset: N,
+        g: G,
+    ) -> impl FnMut(I) -> IResult<I, O, E>
+    where
+        I: Clone + InputLength + InputTake,
+        N: ToUsize,
+        F: Parser<I, N, E>,
+        G: Parser<I, O, E>,
+        E: NomParseError<I>,
+    {
+        length_value(
+            map_opt(f, move |len| len.to_usize().checked_add(offset.to_usize())),
+            g,
+        )
+    }
     /// Repeats the embedded parser until the input is exhausted
     /// and returns the results in a `Vec`.
     ///
@@ -242,6 +292,38 @@ pub mod nm {
         let mut data = [0; N];
         data.copy_from_slice(&i[..N]);
         Ok((&i[N..], data))
+    }
+
+    pub fn bool<'a, E>(i: (In<'a>, usize)) -> IResult<(In<'a>, usize), bool, E>
+    where
+        E: NomParseError<(In<'a>, usize)>,
+    {
+        map(bit_take(1usize), |b: u8| b == 1)(i)
+    }
+
+    pub fn bit_u8<'a, E>(
+        count: u8,
+    ) -> impl FnMut((In<'a>, usize)) -> IResult<(In<'a>, usize), u8, E>
+    where
+        E: NomParseError<(In<'a>, usize)>,
+    {
+        bit_take(count)
+    }
+
+    pub fn bits<'a, O, P>(parser: P) -> impl FnMut(In<'a>) -> IResult<In<'a>, O, Error<In<'a>>>
+    where
+        P: FnMut((In<'a>, usize)) -> IResult<(In<'a>, usize), O, Error<(In<'a>, usize)>>,
+    {
+        nom::bits::bits(parser)
+    }
+
+    pub fn bytes<'a, O, P>(
+        parser: P,
+    ) -> impl FnMut((In<'a>, usize)) -> IResult<(In<'a>, usize), O, Error<(In<'a>, usize)>>
+    where
+        P: FnMut(In<'a>) -> IResult<In<'a>, O, Error<In<'a>>>,
+    {
+        nom::bits::bytes(parser)
     }
 }
 

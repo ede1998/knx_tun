@@ -38,6 +38,10 @@ impl Address {
         self.kind
     }
 
+    pub fn is_zero(&self) -> bool {
+        self.subnet == 0 && self.device == 0
+    }
+
     pub(crate) fn parse(i: In, kind: AddressKind) -> IResult<Self> {
         use nm::*;
         let (i, (subnet, device)) = context("KNX address", tuple((be_u8, be_u8)))(i)?;
