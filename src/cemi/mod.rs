@@ -117,7 +117,7 @@ impl AdditionalInformation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::address::{Address, AddressKind};
+    use crate::address::{Address, AddressKind, RawAddress};
     use npdu::{Apdu, GroupData, Tpdu};
 
     #[rustfmt::skip]
@@ -154,7 +154,10 @@ mod tests {
                 frame_format: FrameFormat::Standard,
             },
             source: Address::new(AddressKind::Individual, 0x11, 0x0b),
-            destination: Address::new(AddressKind::Group, 0x69, 0x01),
+            destination: RawAddress {
+                subnet: 0x69,
+                device: 0x01,
+            },
             tpdu: Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(1))),
         }),
     };

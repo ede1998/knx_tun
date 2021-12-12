@@ -1,7 +1,7 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::{
-    address::{Address, AddressKind},
+    address::{Address, AddressKind, RawAddress},
     snack::*,
 };
 
@@ -12,7 +12,7 @@ pub struct LData {
     pub control_1: Control1,
     pub control_2: Control2,
     pub source: Address,
-    pub destination: Address,
+    pub destination: RawAddress,
     pub tpdu: Tpdu,
 }
 
@@ -22,8 +22,10 @@ impl LData {
         context(stringify!(LData), |i| {
             let (i, (control_1, control_2)) = pair(Control1::parse, Control2::parse)(i)?;
             let (i, source) = Address::parse(i, AddressKind::Individual)?;
-            let (i, destination) = Address::parse(i, control_2.destination_address)?;
-            let (i, tpdu) = length_value_offset(be_u8, 1, |i| Tpdu::parse(i, destination))(i)?;
+            let (i, destination) = RawAddress::parse(i)?;
+            let (i, tpdu) = length_value_offset(be_u8, 1, |i| {
+                Tpdu::parse(i, destination.is_zero(), control_2.destination_address)
+            })(i)?;
 
             Ok((
                 i,
@@ -40,7 +42,6 @@ impl LData {
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        assert_eq!(self.control_2.destination_address, self.destination.kind());
         tuple((
             self.control_1.gen(),
             self.control_2.gen(),

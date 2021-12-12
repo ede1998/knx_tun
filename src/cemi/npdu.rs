@@ -1,7 +1,4 @@
-use crate::{
-    address::{Address, AddressKind},
-    snack::*,
-};
+use crate::{address::AddressKind, snack::*};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SequenceNumber(u8);
@@ -52,7 +49,7 @@ impl Tpdu {
             Tpdu::DataConnected(_, _) | Tpdu::Ack(_) | Tpdu::Nak(_) => true,
         }
     }
-    pub(crate) fn parse(i: In, address: Address) -> IResult<Self> {
+    pub(crate) fn parse(i: In, is_address_zero: bool, address_kind: AddressKind) -> IResult<Self> {
         use nm::*;
 
         enum Either<L, R> {
@@ -94,10 +91,10 @@ impl Tpdu {
                     }
                 }
                 (false, Either::Right(tag)) => match tag {
-                    0 => Ok(match address.kind() {
+                    0 => Ok(match address_kind {
                         AddressKind::Individual => parse_apdu(i, Self::DataIndividual)?,
                         AddressKind::Group => {
-                            if address.is_zero() {
+                            if is_address_zero {
                                 parse_apdu(i, Self::DataBroadcast)?
                             } else {
                                 parse_apdu(i, Self::DataGroup)?

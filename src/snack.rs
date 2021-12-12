@@ -333,7 +333,7 @@ pub mod cf {
     pub use cookie_factory::bytes::*;
     pub use cookie_factory::combinator::{back_to_the_buffer, slice};
     pub use cookie_factory::multi::all;
-    pub use cookie_factory::sequence::tuple;
+    pub use cookie_factory::sequence::{pair, tuple};
     pub use cookie_factory::{gen, gen_simple, WriteContext};
 
     use cookie_factory::{GenError, GenResult, SerializeFn};
@@ -519,6 +519,8 @@ macro_rules! make_tag {
 //    };
 //}
 
+pub struct OutOfRangeError;
+
 pub type U1 = U<1>;
 pub type U2 = U<2>;
 pub type U3 = U<3>;
@@ -530,11 +532,11 @@ pub struct U<const N: u8>(u8);
 impl<const N: u8> U<N> {
     pub const MAX_VALUE: u8 = (1 << N) - 1;
 
-    pub const fn new(data: u8) -> Result<Self, ()> {
+    pub const fn new(data: u8) -> Result<Self, OutOfRangeError> {
         if data <= Self::MAX_VALUE {
             Ok(Self(data))
         } else {
-            Err(())
+            Err(OutOfRangeError)
         }
     }
 
@@ -566,9 +568,9 @@ impl<const N: u8> From<U<N>> for cf::Bits {
 }
 
 impl<const N: u8> TryFrom<u8> for U<N> {
-    type Error = ();
+    type Error = u8;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        Self::new(value)
+        Self::new(value).map_err(|_| value)
     }
 }

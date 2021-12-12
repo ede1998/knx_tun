@@ -7,50 +7,77 @@ pub enum AddressKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
+pub struct RawAddress {
+    pub subnet: u8,
+    pub device: u8,
+}
+
+impl RawAddress {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
+        use nm::*;
+        context(
+            stringify!(RawAddress),
+            map(pair(be_u8, be_u8), |(subnet, device)| Self {
+                subnet,
+                device,
+            }),
+        )(i)
+    }
+
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        pair(be_u8(self.subnet), be_u8(self.device))
+    }
+
+    pub const fn is_zero(&self) -> bool {
+        self.subnet == 0 && self.device == 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Address {
     kind: AddressKind,
-    subnet: u8,
-    device: u8,
+    address: RawAddress,
 }
 
 impl Address {
     pub const fn new(kind: AddressKind, subnet: u8, device: u8) -> Self {
         Self {
             kind,
-            subnet,
-            device,
+            address: RawAddress { subnet, device },
         }
     }
 
     pub fn area(&self) -> u8 {
-        self.subnet >> 4
+        self.address.subnet >> 4
     }
 
     pub fn line(&self) -> u8 {
-        self.subnet & 0xF
+        self.address.subnet & 0xF
     }
 
     pub fn device(&self) -> u8 {
-        self.device
+        self.address.device
+    }
+
+    pub fn subnet(&self) -> u8 {
+        self.address.subnet
     }
 
     pub fn kind(&self) -> AddressKind {
         self.kind
     }
 
-    pub fn is_zero(&self) -> bool {
-        self.subnet == 0 && self.device == 0
-    }
-
     pub(crate) fn parse(i: In, kind: AddressKind) -> IResult<Self> {
         use nm::*;
-        let (i, (subnet, device)) = context("KNX address", tuple((be_u8, be_u8)))(i)?;
-        Ok((i, Self::new(kind, subnet, device)))
+        context(
+            "KNX address",
+            map(RawAddress::parse, |address| Self { address, kind }),
+        )(i)
     }
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
-        use cf::*;
-        tuple((be_u8(self.subnet), be_u8(self.device)))
+        self.address.gen()
     }
 }
 
