@@ -84,16 +84,16 @@ mod tests {
         let (serialized, len) = cookie_factory::gen(info.gen(), vec![]).unwrap();
 
         println!("{:?}", serialized);
-        assert_eq!(serialized.len(), 008, "Wrong length.");
-        assert_eq!(len, 008, "Wrong length in result.");
-        assert_eq!(serialized[0], 008, "Wrong information length.");
-        assert_eq!(serialized[1], 001, "Wrong protocol code.");
+        assert_eq!(serialized.len(), 8, "Wrong length.");
+        assert_eq!(len, 8, "Wrong length in result.");
+        assert_eq!(serialized[0], 8, "Wrong information length.");
+        assert_eq!(serialized[1], 1, "Wrong protocol code.");
         assert_eq!(serialized[2], 127, "Wrong ip address octet 1.");
         assert_eq!(serialized[3], 143, "Wrong ip address octet 2.");
         assert_eq!(serialized[4], 231, "Wrong ip address octet 3.");
         assert_eq!(serialized[5], 144, "Wrong ip address octet 4.");
-        assert_eq!(serialized[6], 000, "Wrong port low value.");
-        assert_eq!(serialized[7], 048, "Wrong port high value.");
+        assert_eq!(serialized[6], 0, "Wrong port low value.");
+        assert_eq!(serialized[7], 48, "Wrong port high value.");
     }
 
     #[test]

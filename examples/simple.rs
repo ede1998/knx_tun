@@ -29,8 +29,8 @@ impl SocketWrapper {
 
     fn send_frame(&self, data: impl Into<Body>) -> std::io::Result<()> {
         let body = data.into();
-        let mut frame = Frame::wrap(body);
-        let (data, len) = cookie_factory::gen(frame.gen(), vec![]).unwrap();
+        let frame = Frame::wrap(body);
+        let (data, _) = cookie_factory::gen(frame.gen(), vec![]).unwrap();
         self.socket.send(&data)?;
         println!("Sent data {:#?}.", data);
         Ok(())
@@ -44,7 +44,7 @@ impl SocketWrapper {
             .recv_from(&mut buf)
             .expect("Could not receive data.");
         println!("Received {} bytes from {}.", len, addr);
-        let (remainder, datagram) = Frame::parse(&buf[..len]).expect("Parsing error.");
+        let (_, datagram) = Frame::parse(&buf[..len]).expect("Parsing error.");
         println!("Parsed {:#?}.", datagram);
         Ok(datagram)
     }
@@ -82,7 +82,7 @@ fn main() -> std::io::Result<()> {
         Body::ConnectionStateResponse(r) => r,
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
-    println!("Received connection state response.");
+    println!("Received connection state response {:#?}.", state_response);
 
     let disconnect_request = DisconnectRequest::new(
         connect_response.communication_channel_id,
@@ -92,6 +92,8 @@ fn main() -> std::io::Result<()> {
     println!("Sent disconnect request.");
 
     let datagram = socket_wrapper.receive_frame()?;
+
+    println!("Received datagram {:#?}.", datagram);
 
     Ok(())
 }
