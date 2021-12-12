@@ -1,10 +1,10 @@
 use nom_derive::NomBE;
 
 use crate::snack::*;
-use ldata::LData;
+use ldata::*;
 
-mod npdu;
 mod ldata;
+mod npdu;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[nom(GenericErrors)]
@@ -117,8 +117,8 @@ impl AdditionalInformation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use npdu::{Apdu, GroupData, Tpdu};
     use crate::address::{Address, AddressKind};
+    use npdu::{Apdu, GroupData, Tpdu};
 
     #[rustfmt::skip]
     const CEMI_IND_GROUP_VALUE_WRITE: [u8; 11] = [
@@ -140,8 +140,19 @@ mod tests {
             additional_info: AdditionalInformation,
         },
         body: CemiBody::LData(LData {
-            control_1: 0xbc,
-            control_2: 0xe0,
+            control_1: Control1 {
+                is_standard_frame: true,
+                do_not_repeat: true,
+                is_normal_broadcast: true,
+                priority: Priority::Low,
+                acknowledge_requested: false,
+                had_transmission_error: false,
+            },
+            control_2: Control2 {
+                destination_address: AddressKind::Group,
+                hop_count: U3::unwrap(6),
+                frame_format: FrameFormat::Standard,
+            },
             source: Address::new(AddressKind::Individual, 0x11, 0x0b),
             destination: Address::new(AddressKind::Group, 0x69, 0x01),
             tpdu: Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(1))),

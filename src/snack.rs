@@ -3,6 +3,7 @@
 
 pub use cookie_factory::SerializeFn;
 pub use std::io::Write;
+use std::ops::Deref;
 
 pub type IResult<'a, O> = nom::IResult<In<'a>, O, nm::Error<In<'a>>>;
 pub type IBitResult<'a, O> = nom::IResult<(In<'a>, usize), O, nm::Error<(In<'a>, usize)>>;
@@ -375,6 +376,122 @@ pub mod cf {
             result
         }
     }
+
+    /// Serializes a stream of single bits.
+    /// If the bit stream ends mid-byte, the remainder of the last bytes is filled
+    /// with 0.
+    pub fn bits<W, C>(collection: C) -> impl SerializeFn<W>
+    where
+        W: Write,
+        C: IntoIterator<Item = Bits> + Clone,
+    {
+        fn remove_excess(value: u64, start: u8, count: u8) -> u64 {
+            let excess_bits_right_removed = value >> (start - count);
+            let keep_count_bits = (1 << count) - 1;
+            excess_bits_right_removed & keep_count_bits
+        }
+
+        move |mut w| {
+            let mut remaining_output_bits = 8;
+            let mut data = 0;
+            for b in collection.clone() {
+                let mut remaining_input_bits = b.len;
+                while remaining_input_bits > 0 {
+                    let bit_count = remaining_input_bits.min(remaining_output_bits);
+                    let bits = remove_excess(b.value, remaining_input_bits, bit_count);
+                    let aligned_bits = bits << (remaining_output_bits - bit_count);
+
+                    data |= aligned_bits as u8;
+                    remaining_output_bits = if remaining_output_bits > bit_count {
+                        remaining_output_bits - bit_count
+                    } else {
+                        w = be_u8(data)(w)?;
+                        data = 0;
+                        8
+                    };
+                    remaining_input_bits -= bit_count;
+                }
+            }
+            if remaining_output_bits != 8 {
+                be_u8(data)(w)
+            } else {
+                Ok(w)
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct Bits {
+        value: u64,
+        len: u8,
+    }
+
+    impl Bits {
+        pub fn new(len: u8, value: u64) -> Self {
+            Self { value, len }
+        }
+    }
+
+    pub mod bits {
+        use super::Bits;
+        pub fn u8(len: u8, value: u8) -> Bits {
+            Bits::new(len, value.into())
+        }
+
+        pub fn u16(len: u8, value: u16) -> Bits {
+            Bits::new(len, value.into())
+        }
+
+        pub fn bool(b: bool) -> Bits {
+            Bits::new(1, b.into())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn bits_single() {
+            use bits::{bool, u8};
+            let mut buf = [0; 5];
+            {
+                let (new_buf, pos) = cookie_factory::gen(
+                    bits([u8(1, 1), bool(false), u8(2, 0b10), u8(4, 0b1110)]),
+                    &mut buf[..],
+                )
+                .unwrap();
+
+                assert_eq!([0; 4], new_buf);
+                assert_eq!(1, pos);
+            }
+
+            assert_eq!([0b10101110, 0, 0, 0, 0], buf);
+        }
+
+        #[test]
+        #[allow(clippy::unusual_byte_groupings)] // used to demark bit groups
+        fn bits_many() {
+            use bits::{bool, u16, u8};
+            let mut buf = [0; 5];
+            {
+                let (new_buf, pos) = cookie_factory::gen(
+                    bits([
+                        u8(2, 0b11),
+                        u16(11, 0b11100011110),
+                        bool(true),
+                        u8(4, 0b0011),
+                    ]),
+                    &mut buf[..],
+                )
+                .unwrap();
+
+                assert_eq!([0; 2], new_buf);
+                assert_eq!(3, pos);
+            }
+
+            assert_eq!([0b11_111000, 0b11110_1_00, 0b11_000000, 0, 0], buf);
+        }
+    }
 }
 
 /// Create a constant named `TAG` inside a struct.
@@ -401,3 +518,57 @@ macro_rules! make_tag {
 //        }
 //    };
 //}
+
+pub type U1 = U<1>;
+pub type U2 = U<2>;
+pub type U3 = U<3>;
+pub type U4 = U<4>;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct U<const N: u8>(u8);
+
+impl<const N: u8> U<N> {
+    pub const MAX_VALUE: u8 = (1 << N) - 1;
+
+    pub const fn new(data: u8) -> Result<Self, ()> {
+        if data <= Self::MAX_VALUE {
+            Ok(Self(data))
+        } else {
+            Err(())
+        }
+    }
+
+    pub const fn unwrap(data: u8) -> Self {
+        match Self::new(data) {
+            Ok(u) => u,
+            Err(_) => panic!("Data was out of bounds."),
+        }
+    }
+
+    pub(crate) fn parse(i: (In, usize)) -> IBitResult<Self> {
+        use nm::*;
+        map(bit_u8(N), Self)(i)
+    }
+}
+
+impl<const N: u8> Deref for U<N> {
+    type Target = u8;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<const N: u8> From<U<N>> for cf::Bits {
+    fn from(u: U<N>) -> Self {
+        cf::bits::u8(N as u8, u.0)
+    }
+}
+
+impl<const N: u8> TryFrom<u8> for U<N> {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}

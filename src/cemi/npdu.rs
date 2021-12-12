@@ -1,4 +1,7 @@
-use crate::{snack::*, address::{AddressKind, Address}};
+use crate::{
+    address::{Address, AddressKind},
+    snack::*,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SequenceNumber(u8);
