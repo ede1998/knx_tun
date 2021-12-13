@@ -1,7 +1,7 @@
 //! Re-exports of nom and cookie_factory items for ease of access through a shorthand use directive.
 //! Additionally, there are helpers methods and macros here for nom and cookie factory.
 
-pub use cookie_factory::SerializeFn;
+pub use cookie_factory::{GenError, SerializeFn};
 pub use std::io::Write;
 use std::ops::Deref;
 
