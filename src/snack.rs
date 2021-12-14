@@ -519,7 +519,8 @@ macro_rules! make_tag {
 //    };
 //}
 
-pub struct OutOfRangeError;
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OutOfRangeError(pub u8);
 
 pub type U1 = U<1>;
 pub type U2 = U<2>;
@@ -536,7 +537,7 @@ impl<const N: u8> U<N> {
         if data <= Self::MAX_VALUE {
             Ok(Self(data))
         } else {
-            Err(OutOfRangeError)
+            Err(OutOfRangeError(data))
         }
     }
 
