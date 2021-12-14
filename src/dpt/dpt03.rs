@@ -61,6 +61,20 @@ impl StepCode {
             StepCode::_64 => 64,
         }
     }
+
+    pub fn try_from_interval(interval: u8) -> Result<Self, u8> {
+        match interval {
+            0 => Ok(Self::Break),
+            1 => Ok(Self::_1),
+            2 => Ok(Self::_2),
+            4 => Ok(Self::_4),
+            8 => Ok(Self::_8),
+            16 => Ok(Self::_16),
+            32 => Ok(Self::_32),
+            64 => Ok(Self::_64),
+            i => Err(i),
+        }
+    }
 }
 
 impl From<U3> for StepCode {
