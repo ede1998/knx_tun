@@ -3,7 +3,6 @@
 
 pub use cookie_factory::{GenError, SerializeFn};
 pub use std::io::Write;
-use std::ops::Deref;
 
 pub type IResult<'a, O> = nom::IResult<In<'a>, O, nm::Error<In<'a>>>;
 pub type IBitResult<'a, O> = nom::IResult<(In<'a>, usize), O, nm::Error<(In<'a>, usize)>>;
@@ -169,7 +168,7 @@ pub mod nm {
         }
     }
 
-    impl<'a, I> FromExternalError<I, ()> for Error<I> {
+    impl<I> FromExternalError<I, ()> for Error<I> {
         fn from_external_error(input: I, kind: NomErrorKind, _: ()) -> Self {
             Self::from_error_kind(input, kind)
         }
@@ -526,19 +525,35 @@ pub type U1 = U<1>;
 pub type U2 = U<2>;
 pub type U3 = U<3>;
 pub type U4 = U<4>;
+pub type U5 = U<5>;
+pub type U6 = U<6>;
+pub type U7 = U<7>;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct U<const N: u8>(u8);
 
 impl<const N: u8> U<N> {
-    pub const MAX_VALUE: u8 = (1 << N) - 1;
+    pub const MAX_U8: u8 = (1 << N) - 1;
+    pub const MAX: U<N> = U(Self::MAX_U8);
 
     pub const fn new(data: u8) -> Result<Self, OutOfRangeError> {
-        if data <= Self::MAX_VALUE {
+        if data <= Self::MAX_U8 {
             Ok(Self(data))
         } else {
             Err(OutOfRangeError(data))
         }
+    }
+
+    pub const fn as_u8(self) -> u8 {
+        self.0
+    }
+
+    pub const fn chain<const M: u8, const SUM: u8>(self, other: U<M>) -> U<SUM>{
+        assert!(N+M==SUM);
+        // extra safety to ensure we don't overflow our expected size.
+        let lhs = self.0 | U::<N>::MAX_U8;
+        let rhs = other.0 | U::<M>::MAX_U8;
+        U((lhs << M) | rhs)
     }
 
     pub const fn unwrap(data: u8) -> Self {
@@ -554,11 +569,9 @@ impl<const N: u8> U<N> {
     }
 }
 
-impl<const N: u8> Deref for U<N> {
-    type Target = u8;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl<const N: u8> From<U<N>> for u8 {
+    fn from(f: U<N>) -> Self {
+        f.0
     }
 }
 
@@ -575,3 +588,20 @@ impl<const N: u8> TryFrom<u8> for U<N> {
         Self::new(value).map_err(|_| value)
     }
 }
+macro_rules! values {
+    ($bit_width:expr, $max:literal) => {
+        impl U<$bit_width> {
+            seq_macro::seq!(N in 0..$max {
+                pub const _~N: U<$bit_width> = U::unwrap(N);
+            });
+        }
+    };
+}
+
+values!(1, 2);
+values!(2, 4);
+values!(3, 8);
+values!(4, 16);
+values!(5, 32);
+values!(6, 64);
+values!(7, 128);

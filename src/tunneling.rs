@@ -2,7 +2,7 @@ use std::{borrow::Cow, convert::TryFrom, marker::PhantomData};
 
 use nom_derive::NomBE;
 
-use crate::snack::*;
+use crate::{snack::*, core::Body};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct ConnectionHeader<T> {
@@ -13,6 +13,15 @@ pub struct ConnectionHeader<T> {
 }
 
 impl<T> ConnectionHeader<T> {
+    pub fn new_empty(communication_channel_id: u8, sequence_counter: u8) -> Self {
+        Self {
+            communication_channel_id,
+            sequence_counter,
+            data: 0,
+            data_type: Default::default(),
+        }
+    }
+
     pub fn new(communication_channel_id: u8, sequence_counter: u8, data: T) -> Self
     where
         T: Into<u8>,
@@ -75,20 +84,20 @@ impl ConnectionHeader<()> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct TunnelingRequest<'a> {
+pub struct TunnelingRequest<'data> {
     pub header: ConnectionHeader<()>,
-    pub cemi: Cow<'a, [u8]>,
+    pub cemi: Cow<'data, [u8]>,
 }
 
-impl<'a> TunnelingRequest<'a> {
-    pub fn new(communication_channel_id: u8, sequence_counter: u8, cemi: Cow<'a, [u8]>) -> Self {
+impl<'data> TunnelingRequest<'data> {
+    pub fn new(communication_channel_id: u8, sequence_counter: u8, cemi: Cow<'data, [u8]>) -> Self {
         Self {
             header: ConnectionHeader::reserved(communication_channel_id, sequence_counter),
             cemi,
         }
     }
 
-    pub(crate) fn parse(i: In<'a>) -> IResult<Self> {
+    pub(crate) fn parse(i: In<'data>) -> IResult<Self> {
         use nm::*;
         context(
             stringify!(TunnelingRequest),
@@ -101,9 +110,15 @@ impl<'a> TunnelingRequest<'a> {
         )(i)
     }
 
-    pub(crate) fn gen<W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
         tuple((self.header.gen(), slice(self.cemi.as_ref())))
+    }
+}
+
+impl<'data> From<TunnelingRequest<'data>> for Body<'data> {
+    fn from(f: TunnelingRequest<'data>) -> Self {
+        Self::TunnelRequest(f)
     }
 }
 

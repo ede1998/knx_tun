@@ -10,7 +10,7 @@ pub struct ConnectionStateRequest {
     pub control_endpoint: Hpai,
 }
 
-impl From<ConnectionStateRequest> for Body {
+impl From<ConnectionStateRequest> for Body<'static> {
     fn from(f: ConnectionStateRequest) -> Self {
         Body::ConnectionStateRequest(f)
     }
@@ -69,7 +69,7 @@ pub struct ConnectionStateResponse {
     pub state: ConnectionState,
 }
 
-impl From<ConnectionStateResponse> for Body {
+impl From<ConnectionStateResponse> for Body<'static> {
     fn from(f: ConnectionStateResponse) -> Self {
         Body::ConnectionStateResponse(f)
     }

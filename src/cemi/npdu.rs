@@ -1,15 +1,11 @@
 use crate::{address::AddressKind, snack::*};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SequenceNumber(u8);
+pub struct SequenceNumber(U4);
 
 impl SequenceNumber {
-    pub fn new(num: u8) -> Result<Self, ()> {
-        if num <= 0b1111 {
-            Ok(Self(num))
-        } else {
-            Err(())
-        }
+    pub fn new(num: U4) -> Self {
+        Self(num)
     }
 }
 
@@ -60,9 +56,9 @@ impl Tpdu {
         bits(|i: (In, usize)| {
             let (i, is_control) = bool(i)?;
             let (i, has_sequence) = bool(i)?;
-            let (i, maybe_sequence) = map_res(bit_u8(4), |n| {
+            let (i, maybe_sequence) = map_res(U4::parse, |n| {
                 if has_sequence {
-                    Ok(Either::Left(SequenceNumber::new(n)?))
+                    Ok(Either::Left(SequenceNumber::new(n)))
                 } else {
                     Ok(Either::Right(n))
                 }
@@ -91,7 +87,7 @@ impl Tpdu {
                     }
                 }
                 (false, Either::Right(tag)) => match tag {
-                    0 => Ok(match address_kind {
+                    U4::_0 => Ok(match address_kind {
                         AddressKind::Individual => parse_apdu(i, Self::DataIndividual)?,
                         AddressKind::Group => {
                             if is_address_zero {
@@ -101,7 +97,7 @@ impl Tpdu {
                             }
                         }
                     }),
-                    1 => bytes(map(Apdu::parse, Self::DataTagGroup))(i),
+                    U4::_1 => bytes(map(Apdu::parse, Self::DataTagGroup))(i),
                     _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
                 },
                 (false, Either::Left(sequence)) => {
@@ -113,19 +109,36 @@ impl Tpdu {
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        be_u8(0)
+        move |out| {
+            match self {
+                Tpdu::DataTagGroup(apdu) | Tpdu::DataGroup(apdu) => apdu.gen(U6::_1)(out),
+                Tpdu::DataBroadcast(apdu) | Tpdu::DataIndividual(apdu) => apdu.gen(U6::_0)(out),
+                Tpdu::DataConnected(seq, apdu) => apdu.gen(U2::_1.chain(seq.0))(out),
+                Tpdu::Connect => be_u8(0b1000_0000)(out),
+                Tpdu::Disconnect => be_u8(0b1000_0001)(out),
+                Tpdu::Ack(seq) => bits([U2::_3.into(), seq.0.into(), U2::_2.into()])(out),
+                Tpdu::Nak(seq) => bits([U2::_3.into(), seq.0.into(), U2::_3.into()])(out),
+            }
+        }
     }
 }
 
 mod apdu_prefix_kind {
-    pub const GROUP_VALUE_READ: u8 = 0b0000;
-    pub const GROUP_VALUE_RESPONSE: u8 = 0b0001;
-    pub const GROUP_VALUE_WRITE: u8 = 0b0010;
+    use crate::snack::U4;
+
+    pub const GROUP_VALUE_READ: U4 = U4::unwrap(0b0000);
+    pub const GROUP_VALUE_RESPONSE: U4 = U4::unwrap(0b0001);
+    pub const GROUP_VALUE_WRITE: U4 = U4::unwrap(0b0010);
 }
 
+// TODO: split this type: only specific stuff belongs together, 
+// i.e. application layer GroupValue{Read,Response,Write} requires
+// transport layer DataGroup
+// and other application layer stuff requires other transport layer
+// option
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Apdu {
-    Whatever,
+    //Whatever,
     GroupValueRead,
     GroupValueResponse(GroupData),
     GroupValueWrite(GroupData),
@@ -136,7 +149,7 @@ impl Apdu {
         use apdu_prefix_kind::*;
         use nm::*;
         let (i, (apdu_prefix_kind, maybe_apdu_suffix_kind)) =
-            bits(preceded(bit_u8(6), pair(bit_u8(4), bit_u8(6))))(i)?;
+            bits(preceded(bit_u8(6), pair(U4::parse, U6::parse)))(i)?;
 
         let parse_group_data = |i| GroupData::parse(maybe_apdu_suffix_kind, i);
 
@@ -144,11 +157,24 @@ impl Apdu {
             GROUP_VALUE_READ => (i, Self::GroupValueRead),
             GROUP_VALUE_RESPONSE => map(parse_group_data, Self::GroupValueResponse)(i)?,
             GROUP_VALUE_WRITE => map(parse_group_data, Self::GroupValueWrite)(i)?,
-            _ => map(rest, |_| Self::Whatever)(i)?,
+            _ => unimplemented!("Apdu other cases"),
+            //_ => map(rest, |_| Self::Whatever)(i)?,
         };
 
         nm::eof(i)?;
         Ok((i, apdu))
+    }
+
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self, prefix_bits: U6) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        use apdu_prefix_kind::*;
+        move |out| {
+            match self {
+                Apdu::GroupValueRead => bits([prefix_bits.into(), GROUP_VALUE_READ.into(), bits::u8(6, 0)])(out),
+                Apdu::GroupValueResponse(gd) => pair(bits([prefix_bits.into(), GROUP_VALUE_RESPONSE.into()]), gd.gen(None))(out),
+                Apdu::GroupValueWrite(gd) => pair(bits([prefix_bits.into(), GROUP_VALUE_WRITE.into()]), gd.gen(None))(out),
+            }
+        }
     }
 }
 
@@ -159,7 +185,7 @@ pub struct GroupData {
 }
 
 impl GroupData {
-    pub(crate) fn parse(remainder: u8, i: In) -> IResult<Self> {
+    pub(crate) fn parse(remainder: U6, i: In) -> IResult<Self> {
         use nm::*;
         let data = if i.is_empty() {
             Self::with_small_payload(remainder)
@@ -171,9 +197,20 @@ impl GroupData {
         Ok((i, data))
     }
 
-    pub const fn with_small_payload(payload: u8) -> Self {
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self, prefix_bits: Option<U2>) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        let prefix_bits = prefix_bits.unwrap_or(U2::unwrap(0));
+        move |out| {
+            match self.length {
+                Length::SixBitOrLess => bits([prefix_bits.into(), bits::u8(6, self.data[0])])(out),
+                Length::Bytes(len) => slice(&self.data[..len.into()])(out),
+            }
+        }
+    }
+
+    pub const fn with_small_payload(payload: U6) -> Self {
         let mut data = [0; 14];
-        data[0] = payload;
+        data[0] = payload.as_u8();
         Self {
             data,
             length: Length::SixBitOrLess,

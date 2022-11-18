@@ -6,7 +6,7 @@ use crate::address::{Address, AddressKind};
 use crate::snack::*;
 
 /// Chapter 7.5.4.2
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceInfo {
     pub knx_medium: KnxMedium,
     pub device_status: DeviceStatus,

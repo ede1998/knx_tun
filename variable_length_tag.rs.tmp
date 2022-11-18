@@ -1,0 +1,38 @@
+struct VariableLengthTag {
+    bit_length: u8,
+    tag: u16,
+}
+
+impl VariableLengthTag {
+    const fn new(tag_str: &str) -> Self {
+        let mut tag_str = tag_str.as_bytes();
+        let mut tag = 0;
+        let mut pos = 0;
+        while let Some((c, remainder)) = tag_str.split_last() {
+            tag_str = remainder;
+            match *c {
+                b'0' => pos += 1,
+                b'1' => {
+                    tag |= 1 << pos;
+                    pos += 1;
+                },
+                b'_' => {},
+                _ => panic!("Invalid character encountered."),
+            }
+        }
+        Self {
+            bit_length: tag_str.len() as u8,
+            tag,
+        }
+    }
+}
+
+const GROUP_VALUE_READ: VariableLengthTag = VariableLengthTag::new("0000_000000");
+const GROUP_VALUE_RESPONSE: VariableLengthTag = VariableLengthTag::new("0001");
+const GROUP_VALUE_WRITE: VariableLengthTag = VariableLengthTag::new("0010");
+
+const fn sort<const N: usize>(d: [VariableLengthTag; N]) ->  [VariableLengthTag; N] {
+    d
+}
+const APCI_TAGS: &[VariableLengthTag] = &sort([GROUP_VALUE_READ, GROUP_VALUE_RESPONSE, GROUP_VALUE_WRITE]);
+fn parse

@@ -6,13 +6,18 @@ pub enum AddressKind {
     Group,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct RawAddress {
     pub subnet: u8,
     pub device: u8,
 }
 
 impl RawAddress {
+    pub const ZERO: RawAddress = RawAddress {
+        device: 0,
+        subnet: 0,
+    };
+
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
@@ -29,8 +34,8 @@ impl RawAddress {
         pair(be_u8(self.subnet), be_u8(self.device))
     }
 
-    pub const fn is_zero(&self) -> bool {
-        self.subnet == 0 && self.device == 0
+    pub fn is_zero(&self) -> bool {
+        *self == Self::ZERO
     }
 }
 
@@ -45,6 +50,17 @@ impl Address {
         Self {
             kind,
             address: RawAddress { subnet, device },
+        }
+    }
+
+    pub const fn from_raw(kind: AddressKind, address: RawAddress) -> Self {
+        Self { kind, address }
+    }
+
+    pub const fn zero(kind: AddressKind) -> Self {
+        Self {
+            kind,
+            address: RawAddress::ZERO,
         }
     }
 
@@ -66,6 +82,10 @@ impl Address {
 
     pub fn kind(&self) -> AddressKind {
         self.kind
+    }
+
+    pub fn raw(&self) -> RawAddress {
+        self.address
     }
 
     pub(crate) fn parse(i: In, kind: AddressKind) -> IResult<Self> {

@@ -111,7 +111,7 @@ pub struct ConnectRequest {
     pub cri: Cri,
 }
 
-impl From<ConnectRequest> for Body {
+impl From<ConnectRequest> for Body<'static> {
     fn from(f: ConnectRequest) -> Self {
         Self::ConnectRequest(f)
     }
@@ -129,7 +129,7 @@ impl ConnectRequest {
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
-            "ConnectRequest",
+            stringify!(ConnectRequest),
             map(
                 tuple((Hpai::parse, Hpai::parse, Cri::parse)),
                 |(ctl, data, cri)| ConnectRequest {
@@ -224,7 +224,7 @@ impl ConnectResponse {
     }
 }
 
-impl From<ConnectResponse> for Body {
+impl From<ConnectResponse> for Body<'static> {
     fn from(f: ConnectResponse) -> Self {
         Self::ConnectResponse(f)
     }

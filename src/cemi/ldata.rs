@@ -17,6 +17,16 @@ pub struct LData {
 }
 
 impl LData {
+    pub fn new(source: Address, destination: Address, tpdu: Tpdu) -> Self {
+        Self {
+            control_1: Default::default(),
+            control_2: Control2::new(destination.kind()),
+            source,
+            destination: destination.raw(),
+            tpdu,
+        }
+    }
+
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(stringify!(LData), |i| {
@@ -47,6 +57,8 @@ impl LData {
             self.control_2.gen(),
             self.source.gen(),
             self.destination.gen(),
+            // missing npdu in between here somewhere -> some length is missing, maybe 2 lengths...
+            self.tpdu.gen(),
         ))
     }
 }
@@ -59,6 +71,19 @@ pub struct Control1 {
     pub priority: Priority,
     pub acknowledge_requested: bool,
     pub had_transmission_error: bool,
+}
+
+impl Default for Control1 {
+    fn default() -> Self {
+        Self {
+            is_standard_frame: true,
+            do_not_repeat: false,
+            is_normal_broadcast: true,
+            priority: Default::default(),
+            acknowledge_requested: false,
+            had_transmission_error: false,
+        }
+    }
 }
 
 impl Control1 {
@@ -94,12 +119,15 @@ impl Control1 {
     }
 }
 
-#[derive(Debug, Clone, Copy, IntoPrimitive, TryFromPrimitive, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, IntoPrimitive, Default, TryFromPrimitive, PartialEq, Eq, PartialOrd, Ord,
+)]
 #[repr(u8)]
 pub enum Priority {
     /// Mandatory for long Frames, burst traffic...
     Low = 0b11,
     /// Default for short Frames
+    #[default]
     Normal = 0b01,
     /// Reserved for urgent Frames
     Urgent = 0b10,
@@ -113,7 +141,7 @@ impl Priority {
         context(
             stringify!(Priority),
             map(U2::parse, |b| {
-                (*b).try_into().expect(
+                u8::from(b).try_into().expect(
                 "Failed to convert u2 to priority. This should have been an infalliable operation.",
             )
             }),
@@ -135,6 +163,14 @@ pub struct Control2 {
 }
 
 impl Control2 {
+    pub fn new(kind: AddressKind) -> Self {
+        Self {
+            destination_address: kind,
+            hop_count: U3::MAX,
+            frame_format: Default::default(),
+        }
+    }
+
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
@@ -164,16 +200,11 @@ impl Control2 {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FrameFormat {
+    #[default]
     Standard,
     Lte(U2),
-}
-
-impl Default for FrameFormat {
-    fn default() -> Self {
-        Self::Standard
-    }
 }
 
 impl FrameFormat {
@@ -201,7 +232,7 @@ impl From<FrameFormat> for cf::Bits {
             4,
             match f {
                 FrameFormat::Standard => 0,
-                FrameFormat::Lte(number) => 0b0100 | *number,
+                FrameFormat::Lte(number) => 0b0100 | u8::from(number),
             },
         )
     }

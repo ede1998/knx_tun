@@ -1,0 +1,53 @@
+use std::collections::HashMap;
+
+use crate::address::RawAddress;
+use crate::dpt::general::DataPointType;
+use crate::snack::nm::Error;
+use crate::snack::In;
+
+struct Monitor<'a> {
+    handlers: HashMap<RawAddress, Box<dyn FnMut(In) + 'a>>,
+    error_handler: Box<dyn FnMut(RawAddress, nom::Err<Error<In>>) + 'a>,
+}
+
+impl<'a> Monitor<'a> {
+    fn new(error_handler: Box<dyn FnMut(RawAddress, nom::Err<Error<In>>)>) -> Self {
+        Self {
+            handlers: HashMap::new(),
+            error_handler,
+        }
+    }
+
+    fn add<'b, F, T>(&'b mut self, addr: RawAddress, mut f: F)
+    where
+        F: FnMut(T) + 'a,
+        T: DataPointType,
+        'a: 'b,
+    {
+        let error_handler = &mut self.error_handler;
+        let handler = Box::new(move |i: &[u8]| match T::parse(i) {
+            Ok((_, t)) => f(t),
+            Err(e) => error_handler(addr, e),
+        });
+        self.handlers.insert(addr, handler);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::dpt::dpt01::Switch;
+
+    use super::*;
+
+    #[test]
+    fn test() {
+        let mut monitor = Monitor::new(Box::new(|addr, err| {}));
+        monitor.add(
+            RawAddress {
+                subnet: 13,
+                device: 1,
+            },
+            |switch: Switch| {},
+        );
+    }
+}

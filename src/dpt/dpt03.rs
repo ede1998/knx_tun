@@ -79,7 +79,7 @@ impl StepCode {
 
 impl From<U3> for StepCode {
     fn from(d: U3) -> Self {
-        Self::try_from(*d).expect("U3 only represents 3 bits so the conversion is infalliable.")
+        Self::try_from(d).expect("U3 only represents 3 bits so the conversion is infalliable.")
     }
 }
 

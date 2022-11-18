@@ -5,6 +5,7 @@ use crate::connect::{ConnectRequest, ConnectResponse};
 use crate::disconnect::{DisconnectRequest, DisconnectResponse};
 use crate::keep_alive::{ConnectionStateRequest, ConnectionStateResponse};
 use crate::snack::*;
+use crate::tunneling::TunnelingRequest;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[nom(GenericErrors)]
@@ -92,16 +93,17 @@ impl Header {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub enum Body {
+pub enum Body<'data> {
     ConnectRequest(ConnectRequest),
     ConnectResponse(ConnectResponse),
+    TunnelRequest(TunnelingRequest<'data>),
     DisconnectRequest(DisconnectRequest),
     DisconnectResponse(DisconnectResponse),
     ConnectionStateRequest(ConnectionStateRequest),
     ConnectionStateResponse(ConnectionStateResponse),
 }
 
-impl Body {
+impl<'data> Body<'data> {
     fn as_service_type(&self) -> ServiceType {
         match self {
             Self::ConnectRequest(_) => ServiceType::ConnectRequest,
@@ -110,6 +112,7 @@ impl Body {
             Self::DisconnectResponse(_) => ServiceType::DisconnectResponse,
             Self::ConnectionStateRequest(_) => ServiceType::ConnectionStateRequest,
             Self::ConnectionStateResponse(_) => ServiceType::ConnectionStateResponse,
+            Self::TunnelRequest(_) => ServiceType::TunnelRequest,
         }
     }
 
@@ -121,6 +124,7 @@ impl Body {
             Body::DisconnectResponse(m) => m.gen()(buf),
             Body::ConnectionStateRequest(m) => m.gen()(buf),
             Body::ConnectionStateResponse(m) => m.gen()(buf),
+            Body::TunnelRequest(m) => m.gen()(buf),
         }
     }
 
@@ -142,12 +146,12 @@ impl Body {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Frame {
-    pub body: Body,
+pub struct Frame<'data> {
+    pub body: Body<'data>,
 }
 
-impl Frame {
-    pub fn wrap(body: Body) -> Self {
+impl<'data> Frame<'data> {
+    pub fn wrap(body: Body<'data>) -> Self {
         Self { body }
     }
 
@@ -165,7 +169,7 @@ impl Frame {
         )
     }
 
-    pub fn parse(i: In) -> IResult<Self> {
+    pub fn parse(i: In<'data>) -> IResult<Self> {
         use nm::*;
         let (i, header) = Header::parse(i)?;
         let (i, inner) = take(header.body_length)(i)?;

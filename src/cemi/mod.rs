@@ -1,7 +1,8 @@
 use nom_derive::NomBE;
 
 use crate::snack::*;
-use ldata::*;
+pub use ldata::*;
+pub use npdu::*;
 
 mod ldata;
 mod npdu;
@@ -9,7 +10,7 @@ mod npdu;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[nom(GenericErrors)]
 #[repr(u8)]
-enum MessageCode {
+pub enum MessageCode {
     LBusmonInd = 0x2B,
     LDataCon = 0x2E,
     LDataInd = 0x29,
@@ -43,7 +44,7 @@ impl From<MessageCode> for u8 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct Cemi {
+pub struct Cemi {
     pub header: CemiHeader,
     pub body: CemiBody,
 }
@@ -60,9 +61,15 @@ impl Cemi {
         };
         Ok((i, Self { header, body }))
     }
+
+    pub fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+        use cf::*;
+        let CemiBody::LData(body) = &self.body;
+        pair(self.header.gen(), body.gen())
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct CemiHeader {
+pub struct CemiHeader {
     pub message_code: MessageCode,
     pub additional_info: AdditionalInformation,
 }
@@ -89,7 +96,7 @@ impl CemiHeader {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum CemiBody {
+pub enum CemiBody {
     LData(LData),
 }
 
@@ -100,7 +107,7 @@ impl From<LData> for CemiBody {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct AdditionalInformation;
+pub struct AdditionalInformation;
 
 impl AdditionalInformation {
     pub(crate) fn parse(i: In) -> IResult<Self> {
@@ -158,7 +165,9 @@ mod tests {
                 subnet: 0x69,
                 device: 0x01,
             },
-            tpdu: Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(1))),
+            tpdu: Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(
+                U6::unwrap(1),
+            ))),
         }),
     };
 
