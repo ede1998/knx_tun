@@ -2,7 +2,7 @@ use std::{borrow::Cow, convert::TryFrom, marker::PhantomData};
 
 use nom_derive::NomBE;
 
-use crate::{snack::*, core::Body};
+use crate::{core::Body, snack::*};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct ConnectionHeader<T> {
@@ -159,6 +159,12 @@ impl TunnelingAck {
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         self.0.gen()
+    }
+}
+
+impl From<TunnelingAck> for Body<'static> {
+    fn from(f: TunnelingAck) -> Self {
+        Body::TunnelAck(f)
     }
 }
 

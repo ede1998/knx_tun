@@ -166,9 +166,9 @@ mod tests {
                 subnet: 0x69,
                 device: 0x01,
             },
-            npdu: Npdu(Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(
-                U6::unwrap(1),
-            )))),
+            npdu: Npdu(Tpdu::DataGroup(Apdu::GroupValueWrite(
+                GroupData::with_small_payload(U6::unwrap(1)),
+            ))),
         }),
     };
 

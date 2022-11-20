@@ -5,7 +5,7 @@ use crate::connect::{ConnectRequest, ConnectResponse};
 use crate::disconnect::{DisconnectRequest, DisconnectResponse};
 use crate::keep_alive::{ConnectionStateRequest, ConnectionStateResponse};
 use crate::snack::*;
-use crate::tunneling::{TunnelingRequest, TunnelingAck};
+use crate::tunneling::{TunnelingAck, TunnelingRequest};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[nom(GenericErrors)]
@@ -142,6 +142,8 @@ impl<'data> Body<'data> {
                 ServiceType::DisconnectResponse => into(DisconnectResponse::parse)(i),
                 ServiceType::ConnectionStateRequest => into(ConnectionStateRequest::parse)(i),
                 ServiceType::ConnectionStateResponse => into(ConnectionStateResponse::parse)(i),
+                ServiceType::TunnelRequest => into(TunnelingRequest::parse)(i),
+                ServiceType::TunnelResponse => into(TunnelingAck::parse)(i),
                 _ => Err(Err::Error(make_error(i, NomErrorKind::Switch))),
             }),
         )(i)

@@ -1,6 +1,7 @@
 use std::{
     any::Any,
-    net::{Ipv4Addr, SocketAddrV4, UdpSocket}, borrow::Borrow,
+    borrow::Borrow,
+    net::{Ipv4Addr, SocketAddrV4, UdpSocket},
 };
 
 use knx_tun::{
@@ -49,20 +50,26 @@ impl SocketWrapper {
         let frame = Frame::wrap(body);
         let (data, _) = cookie_factory::gen(frame.gen(), vec![]).unwrap();
         self.socket.send(&data)?;
-        let name = std::any::type_name::<T>().rsplit_once("::").map_or("?", |r| r.1);
-        println!("Sent {name}: {data:?}.");
+        let name = std::any::type_name::<T>()
+            .rsplit_once("::")
+            .map_or("?", |r| r.1);
+        println!("Sent {name}: {frame:?}");
+        println!("Outgoing: {data:?}");
         Ok(())
     }
 
     fn receive_frame<'data>(&self, buf: &'data mut [u8]) -> std::io::Result<Frame<'data>> {
-        let (len, addr) = self.socket.recv_from(buf).expect("Could not receive data.");
-        println!("Received {len} bytes from {addr}.");
+        let (len, _addr) = self.socket.recv_from(buf).expect("Could not receive data.");
+        //println!("Received {len} bytes from {_addr}.");
+        println!("Incoming: {:?}", &buf[..len]);
         let (_, datagram) = Frame::parse(&buf[..len]).expect("Parsing error.");
-        println!("Received {:?} in {datagram:?}\n\n", datagram.body.as_service_type());
+        println!(
+            "Received {:?}: {datagram:?}\n\n",
+            datagram.body.as_service_type()
+        );
         Ok(datagram)
     }
 }
-
 
 fn main() -> std::io::Result<()> {
     let socket_wrapper = SocketWrapper::try_new()?;
@@ -135,7 +142,6 @@ fn main() -> std::io::Result<()> {
 
     let mut buf = [0; 100];
     let _datagram = socket_wrapper.receive_frame(&mut buf)?;
-
 
     Ok(())
 }
