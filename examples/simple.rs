@@ -16,7 +16,7 @@ use knx_tun::{
     hpai::*,
     keep_alive::ConnectionStateRequest,
     snack::{U3, U5, U6},
-    tunneling::{ConnectionHeader, TunnelingRequest},
+    tunneling::{ConnectionHeader, TunnelingRequest, TunnelingAck, TunnelingAckState},
 };
 
 const PORT: u16 = 3671;
@@ -89,10 +89,6 @@ fn main() -> std::io::Result<()> {
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
 
-    socket_wrapper
-        .socket
-        .connect(connect_response.data_endpoint.address)?;
-
     let state_request = ConnectionStateRequest::new(
         connect_response.communication_channel_id,
         socket_wrapper.control_ep.clone(),
@@ -106,6 +102,10 @@ fn main() -> std::io::Result<()> {
         Body::ConnectionStateResponse(r) => r,
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
+
+    socket_wrapper
+        .socket
+        .connect(connect_response.data_endpoint.address)?;
 
     let cemi = Cemi {
         header: CemiHeader {
@@ -134,6 +134,19 @@ fn main() -> std::io::Result<()> {
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
 
+    let mut buf = [0; 100];
+    let datagram = socket_wrapper.receive_frame(&mut buf)?;
+    let tunnel_req = match datagram.body {
+        Body::TunnelRequest(r) => r,
+        b => panic!("Telegram of unexpected type {:#?}", b),
+    };
+
+    let tunnel_ack = TunnelingAck::new(connect_response.communication_channel_id, tunnel_req.header.sequence_counter, TunnelingAckState::NoError);
+    socket_wrapper.send_frame(tunnel_ack)?;
+
+    socket_wrapper
+        .socket
+        .connect(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT))?;
     let disconnect_request = DisconnectRequest::new(
         connect_response.communication_channel_id,
         socket_wrapper.control_ep.clone(),

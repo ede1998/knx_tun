@@ -1,0 +1,26 @@
+Client                                         Server
+SEARCH_REQUEST                     ----------> multicast to port 3671
+now has control endpoint (IP+Port) <---------- SEARCH_RESPONSE
+
+DESCRIPTION_REQUEST                ----------> to control endpoint
+now knows supported services       <---------- DESCRIPTION_RESPONSE
+
+CONNECT_REQUEST to ctrl ep         ----------> assigns connection id and individual address
+stores data ep                     <---------- CONNECT_RESPONSE
+
+every 60 sec while any connection active (e.g. tunneling, mgmt, ...): keep alive (8.2.8 KNXnet/IP Core 5.4)
+CONNECTIONSTATE_REQUEST to ctrl ep ----------> Resets timeout
+Resets timeout                     <---------- CONNECTIONSTATE_RESPONSE
+
+TUNNEL_REQUEST to data ep LData.req ----------> forwards to TP
+knows message arrived              <----------- TUNNEL_ACK
+receives confirmation for write    <----------- TUNNEL_REQUEST to data ep LData.con
+TUNNEL_ACK                         -----------> knows message arrived
+
+receives info that sth changed     <----------- TUNNEL_REQUEST to data ep LData.ind
+TUNNEL_ACK                         -----------> knows message arrived
+
+DISCONNECT_REQUEST to ctrl ep      -----------> closes connection
+closes connection                  <----------- DISCONNECT_RESPONSE
+
+
