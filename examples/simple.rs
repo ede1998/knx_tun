@@ -1,14 +1,21 @@
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::{
+    any::Any,
+    net::{Ipv4Addr, SocketAddrV4, UdpSocket}, borrow::Borrow,
+};
 
 use knx_tun::{
-    address::{Address, AddressKind},
-    cemi::{AdditionalInformation, Apdu, Cemi, CemiBody, CemiHeader, LData, MessageCode, Tpdu, GroupData},
+    address::{Address, RawAddress},
+    cemi::{
+        AdditionalInformation, Apdu, Cemi, CemiBody, CemiHeader, GroupData, LData, MessageCode,
+        Tpdu,
+    },
     connect::*,
     core::*,
     disconnect::DisconnectRequest,
     hpai::*,
     keep_alive::ConnectionStateRequest,
-    tunneling::{ConnectionHeader, TunnelingRequest}, snack::U6,
+    snack::{U3, U5, U6},
+    tunneling::{ConnectionHeader, TunnelingRequest},
 };
 
 const PORT: u16 = 3671;
@@ -34,26 +41,28 @@ impl SocketWrapper {
         })
     }
 
-    fn send_frame<'data>(&self, data: impl Into<Body<'data>>) -> std::io::Result<()> {
+    fn send_frame<'data, T>(&self, data: T) -> std::io::Result<()>
+    where
+        T: Into<Body<'data>> + Any,
+    {
         let body = data.into();
         let frame = Frame::wrap(body);
         let (data, _) = cookie_factory::gen(frame.gen(), vec![]).unwrap();
         self.socket.send(&data)?;
-        println!("Sent data {:#?}.", data);
+        let name = std::any::type_name::<T>().rsplit_once("::").map_or("?", |r| r.1);
+        println!("Sent {name}: {data:?}.");
         Ok(())
     }
 
     fn receive_frame<'data>(&self, buf: &'data mut [u8]) -> std::io::Result<Frame<'data>> {
-        let (len, addr) = self
-            .socket
-            .recv_from(buf)
-            .expect("Could not receive data.");
+        let (len, addr) = self.socket.recv_from(buf).expect("Could not receive data.");
         println!("Received {len} bytes from {addr}.");
         let (_, datagram) = Frame::parse(&buf[..len]).expect("Parsing error.");
-        println!("Parsed {:#?}.", datagram);
+        println!("Received {:?} in {datagram:?}\n\n", datagram.body.as_service_type());
         Ok(datagram)
     }
 }
+
 
 fn main() -> std::io::Result<()> {
     let socket_wrapper = SocketWrapper::try_new()?;
@@ -64,7 +73,6 @@ fn main() -> std::io::Result<()> {
         Cri::new_tunnel(KnxLayer::LinkLayer),
     );
     socket_wrapper.send_frame(connect_request)?;
-    println!("Sent connect request.");
 
     let mut buf = [0; 100];
     let datagram = socket_wrapper.receive_frame(&mut buf)?;
@@ -73,7 +81,10 @@ fn main() -> std::io::Result<()> {
         Body::ConnectResponse(r) => r,
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
-    println!("Received connect response.");
+
+    socket_wrapper
+        .socket
+        .connect(connect_response.data_endpoint.address)?;
 
     let state_request = ConnectionStateRequest::new(
         connect_response.communication_channel_id,
@@ -81,15 +92,13 @@ fn main() -> std::io::Result<()> {
     );
 
     socket_wrapper.send_frame(state_request)?;
-    println!("Sent connection state request.");
 
     let mut buf = [0; 100];
     let datagram = socket_wrapper.receive_frame(&mut buf)?;
-    let state_response = match datagram.body {
+    let _state_response = match datagram.body {
         Body::ConnectionStateResponse(r) => r,
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
-    println!("Received connection state response {:#?}.", state_response);
 
     let cemi = Cemi {
         header: CemiHeader {
@@ -97,8 +106,8 @@ fn main() -> std::io::Result<()> {
             additional_info: AdditionalInformation,
         },
         body: CemiBody::LData(LData::new(
-            Address::zero(AddressKind::Individual),
-            Address::new(AddressKind::Group, 0x21, 20),
+            RawAddress::ZERO,
+            Address::group(U5::_2, U3::_1, 20),
             Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(U6::_1))),
         )),
     };
@@ -111,17 +120,22 @@ fn main() -> std::io::Result<()> {
 
     socket_wrapper.send_frame(message)?;
 
+    let mut buf = [0; 100];
+    let datagram = socket_wrapper.receive_frame(&mut buf)?;
+    let _tunnel_ack = match datagram.body {
+        Body::TunnelAck(r) => r,
+        b => panic!("Telegram of unexpected type {:#?}", b),
+    };
+
     let disconnect_request = DisconnectRequest::new(
         connect_response.communication_channel_id,
         socket_wrapper.control_ep.clone(),
     );
     socket_wrapper.send_frame(disconnect_request)?;
-    println!("Sent disconnect request.");
 
     let mut buf = [0; 100];
-    let datagram = socket_wrapper.receive_frame(&mut buf)?;
+    let _datagram = socket_wrapper.receive_frame(&mut buf)?;
 
-    println!("Received datagram {:#?}.", datagram);
 
     Ok(())
 }

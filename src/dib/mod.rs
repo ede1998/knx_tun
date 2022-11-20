@@ -38,7 +38,7 @@ impl DescriptionType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Dib {
     DeviceInfo(DeviceInfo),
     SupportedServiceFamilies(Vec<ServiceFamily>),

@@ -1,3 +1,4 @@
+use cookie_factory::BackToTheBuffer;
 use nom_derive::NomBE;
 
 use crate::snack::*;
@@ -62,7 +63,7 @@ impl Cemi {
         Ok((i, Self { header, body }))
     }
 
-    pub fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+    pub fn gen<'a, W: BackToTheBuffer + Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
         let CemiBody::LData(body) = &self.body;
         pair(self.header.gen(), body.gen())
@@ -165,9 +166,9 @@ mod tests {
                 subnet: 0x69,
                 device: 0x01,
             },
-            tpdu: Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(
+            npdu: Npdu(Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(
                 U6::unwrap(1),
-            ))),
+            )))),
         }),
     };
 

@@ -1,3 +1,4 @@
+use cookie_factory::BackToTheBuffer;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::{
@@ -5,7 +6,7 @@ use crate::{
     snack::*,
 };
 
-use super::npdu::Tpdu;
+use super::{npdu::Tpdu, Npdu};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LData {
@@ -13,17 +14,17 @@ pub struct LData {
     pub control_2: Control2,
     pub source: Address,
     pub destination: RawAddress,
-    pub tpdu: Tpdu,
+    pub npdu: Npdu,
 }
 
 impl LData {
-    pub fn new(source: Address, destination: Address, tpdu: Tpdu) -> Self {
+    pub fn new(source: RawAddress, destination: Address, tpdu: Tpdu) -> Self {
         Self {
             control_1: Default::default(),
             control_2: Control2::new(destination.kind()),
-            source,
+            source: Address::from_raw(AddressKind::Individual, source),
             destination: destination.raw(),
-            tpdu,
+            npdu: Npdu(tpdu),
         }
     }
 
@@ -33,9 +34,7 @@ impl LData {
             let (i, (control_1, control_2)) = pair(Control1::parse, Control2::parse)(i)?;
             let (i, source) = Address::parse(i, AddressKind::Individual)?;
             let (i, destination) = RawAddress::parse(i)?;
-            let (i, tpdu) = length_value_offset(be_u8, 1, |i| {
-                Tpdu::parse(i, destination.is_zero(), control_2.destination_address)
-            })(i)?;
+            let (i, npdu) = Npdu::parse(i, destination.is_zero(), control_2.destination_address)?;
 
             Ok((
                 i,
@@ -44,21 +43,20 @@ impl LData {
                     control_2,
                     source,
                     destination,
-                    tpdu,
+                    npdu,
                 },
             ))
         })(i)
     }
 
-    pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
+    pub(crate) fn gen<'a, W: BackToTheBuffer + Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
         tuple((
             self.control_1.gen(),
             self.control_2.gen(),
             self.source.gen(),
             self.destination.gen(),
-            // missing npdu in between here somewhere -> some length is missing, maybe 2 lengths...
-            self.tpdu.gen(),
+            self.npdu.gen(),
         ))
     }
 }

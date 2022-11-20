@@ -5,7 +5,7 @@ use crate::connect::{ConnectRequest, ConnectResponse};
 use crate::disconnect::{DisconnectRequest, DisconnectResponse};
 use crate::keep_alive::{ConnectionStateRequest, ConnectionStateResponse};
 use crate::snack::*;
-use crate::tunneling::TunnelingRequest;
+use crate::tunneling::{TunnelingRequest, TunnelingAck};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, NomBE)]
 #[nom(GenericErrors)]
@@ -97,6 +97,7 @@ pub enum Body<'data> {
     ConnectRequest(ConnectRequest),
     ConnectResponse(ConnectResponse),
     TunnelRequest(TunnelingRequest<'data>),
+    TunnelAck(TunnelingAck),
     DisconnectRequest(DisconnectRequest),
     DisconnectResponse(DisconnectResponse),
     ConnectionStateRequest(ConnectionStateRequest),
@@ -104,7 +105,7 @@ pub enum Body<'data> {
 }
 
 impl<'data> Body<'data> {
-    fn as_service_type(&self) -> ServiceType {
+    pub fn as_service_type(&self) -> ServiceType {
         match self {
             Self::ConnectRequest(_) => ServiceType::ConnectRequest,
             Self::ConnectResponse(_) => ServiceType::ConnectResponse,
@@ -113,6 +114,7 @@ impl<'data> Body<'data> {
             Self::ConnectionStateRequest(_) => ServiceType::ConnectionStateRequest,
             Self::ConnectionStateResponse(_) => ServiceType::ConnectionStateResponse,
             Self::TunnelRequest(_) => ServiceType::TunnelRequest,
+            Self::TunnelAck(_) => ServiceType::TunnelResponse,
         }
     }
 
@@ -125,6 +127,7 @@ impl<'data> Body<'data> {
             Body::ConnectionStateRequest(m) => m.gen()(buf),
             Body::ConnectionStateResponse(m) => m.gen()(buf),
             Body::TunnelRequest(m) => m.gen()(buf),
+            Body::TunnelAck(m) => m.gen()(buf),
         }
     }
 

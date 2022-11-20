@@ -2,6 +2,7 @@
 //! Additionally, there are helpers methods and macros here for nom and cookie factory.
 
 pub use cookie_factory::{GenError, SerializeFn};
+use std::fmt::Display;
 pub use std::io::Write;
 
 pub type IResult<'a, O> = nom::IResult<In<'a>, O, nm::Error<In<'a>>>;
@@ -212,6 +213,8 @@ pub mod nm {
         )
     }
 
+    /// Reads a length, adds an offset to it and then parses a slice of the resulting length with
+    /// the second parser.
     pub fn length_value_offset<I, O, N, E, F, G>(
         f: F,
         offset: N,
@@ -548,11 +551,11 @@ impl<const N: u8> U<N> {
         self.0
     }
 
-    pub const fn chain<const M: u8, const SUM: u8>(self, other: U<M>) -> U<SUM>{
-        assert!(N+M==SUM);
+    pub const fn chain<const M: u8, const SUM: u8>(self, other: U<M>) -> U<SUM> {
+        assert!(N + M == SUM);
         // extra safety to ensure we don't overflow our expected size.
-        let lhs = self.0 | U::<N>::MAX_U8;
-        let rhs = other.0 | U::<M>::MAX_U8;
+        let lhs = self.0 & U::<N>::MAX_U8;
+        let rhs = other.0 & U::<M>::MAX_U8;
         U((lhs << M) | rhs)
     }
 
@@ -588,6 +591,13 @@ impl<const N: u8> TryFrom<u8> for U<N> {
         Self::new(value).map_err(|_| value)
     }
 }
+
+impl<const N: u8> Display for U<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 macro_rules! values {
     ($bit_width:expr, $max:literal) => {
         impl U<$bit_width> {

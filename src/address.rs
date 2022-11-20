@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::snack::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -53,6 +55,26 @@ impl Address {
         }
     }
 
+    pub const fn group(area: U5, line: U3, device: u8) -> Self {
+        Self {
+            kind: AddressKind::Group,
+            address: RawAddress {
+                subnet: area.chain::<3, 8>(line).as_u8(),
+                device,
+            },
+        }
+    }
+
+    pub const fn individual(area: U5, line: U3, device: u8) -> Self {
+        Self {
+            kind: AddressKind::Individual,
+            address: RawAddress {
+                subnet: area.chain::<3, 8>(line).as_u8(),
+                device,
+            },
+        }
+    }
+
     pub const fn from_raw(kind: AddressKind, address: RawAddress) -> Self {
         Self { kind, address }
     }
@@ -64,12 +86,12 @@ impl Address {
         }
     }
 
-    pub fn area(&self) -> u8 {
-        self.address.subnet >> 4
+    pub fn area(&self) -> U5 {
+        U5::unwrap(self.address.subnet >> 3)
     }
 
-    pub fn line(&self) -> u8 {
-        self.address.subnet & 0xF
+    pub fn line(&self) -> U3 {
+        U3::unwrap(self.address.subnet & 0b111)
     }
 
     pub fn device(&self) -> u8 {
@@ -101,6 +123,61 @@ impl Address {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddressParseError {
+    MissingComponents,
+    TooManyComponent(usize),
+    MixedSeparators,
+    MissingSeparator,
+    InvalidNumber(String),
+}
+
+impl FromStr for Address {
+    type Err = AddressParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let is_group = s.contains('/');
+        let is_individual = s.contains('.');
+        let (kind, sep) = match (is_group, is_individual) {
+            (true, false) => (AddressKind::Group, "/"),
+            (false, true) => (AddressKind::Individual, "."),
+            (true, true) => return Err(AddressParseError::MixedSeparators),
+            (false, false) => return Err(AddressParseError::MissingSeparator),
+        };
+        let mut numbers = s.split(sep);
+
+        let mut parse_number = |max_value: u8| -> Result<u8, AddressParseError> {
+            let num = numbers.next().ok_or(AddressParseError::MissingComponents)?;
+            let number = num
+                .parse()
+                .map_err(|_| AddressParseError::InvalidNumber(num.to_owned()))?;
+
+            if number > max_value {
+                Err(AddressParseError::InvalidNumber(num.to_owned()))
+            } else {
+                Ok(number)
+            }
+        };
+
+        let area = parse_number(U5::MAX_U8)?;
+        let line = parse_number(U3::MAX_U8)?;
+        let device = parse_number(u8::MAX)?;
+
+        let remainder = numbers.count();
+        if remainder > 0 {
+            return Err(AddressParseError::TooManyComponent(remainder));
+        }
+
+        Ok(Address {
+            kind,
+            address: RawAddress {
+                subnet: (area << 3) | line,
+                device,
+            },
+        })
+    }
+}
+
 impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sep = match self.kind {
@@ -113,7 +190,6 @@ impl std::fmt::Display for Address {
             self.area(),
             self.line(),
             self.device(),
-            sep = sep
         )
     }
 }
@@ -138,5 +214,21 @@ mod tests {
         let (actual, len) = cookie_factory::gen(TEST_ADDRESS.gen(), vec![]).unwrap();
         assert_eq!(len, TEST_DATA_ADDRESS.len() as u64);
         assert_eq!(&TEST_DATA_ADDRESS[..], &actual[..]);
+    }
+
+    #[test]
+    fn stringify_address() {
+        let (_, actual) = Address::parse(&[0x42, 0x13], AddressKind::Group).unwrap();
+        assert_eq!(format!("{actual}"), "8/2/19");
+    }
+
+    #[test]
+    fn parse_string() {
+        let actual: Address = "8/2/19".parse().unwrap();
+        let expected = Address::group(U5::_8, U3::_2, 19);
+        assert_eq!(actual, expected, "{actual} != {expected}");
+
+        let actual: Address = "28.4.149".parse().unwrap();
+        assert_eq!(actual, Address::individual(U5::_28, U3::_4, 149));
     }
 }
