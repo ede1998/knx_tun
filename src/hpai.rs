@@ -16,9 +16,10 @@ impl From<HostProtocolCode> for u8 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Hpai {
     pub protocol_code: HostProtocolCode,
+    /// Only IPv4 supported right now. (Core 8.6.2)
     pub address: SocketAddrV4,
 }
 

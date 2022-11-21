@@ -73,6 +73,11 @@ pub struct TunnelRequest {
 
 impl TunnelRequest {
     make_tag! {0x04, u8}
+
+    pub fn new(layer: KnxLayer) -> Self {
+        Self { layer }
+    }
+
     pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
@@ -111,7 +116,7 @@ pub struct ConnectRequest {
     pub cri: Cri,
 }
 
-impl From<ConnectRequest> for Body<'static> {
+impl From<ConnectRequest> for Body {
     fn from(f: ConnectRequest) -> Self {
         Self::ConnectRequest(f)
     }
@@ -224,7 +229,7 @@ impl ConnectResponse {
     }
 }
 
-impl From<ConnectResponse> for Body<'static> {
+impl From<ConnectResponse> for Body {
     fn from(f: ConnectResponse) -> Self {
         Self::ConnectResponse(f)
     }

@@ -93,10 +93,10 @@ impl Header {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub enum Body<'data> {
+pub enum Body {
     ConnectRequest(ConnectRequest),
     ConnectResponse(ConnectResponse),
-    TunnelRequest(TunnelingRequest<'data>),
+    TunnelRequest(TunnelingRequest),
     TunnelAck(TunnelingAck),
     DisconnectRequest(DisconnectRequest),
     DisconnectResponse(DisconnectResponse),
@@ -104,7 +104,7 @@ pub enum Body<'data> {
     ConnectionStateResponse(ConnectionStateResponse),
 }
 
-impl<'data> Body<'data> {
+impl Body {
     pub fn as_service_type(&self) -> ServiceType {
         match self {
             Self::ConnectRequest(_) => ServiceType::ConnectRequest,
@@ -151,12 +151,12 @@ impl<'data> Body<'data> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Frame<'data> {
-    pub body: Body<'data>,
+pub struct Frame {
+    pub body: Body,
 }
 
-impl<'data> Frame<'data> {
-    pub fn wrap(body: Body<'data>) -> Self {
+impl Frame {
+    pub fn wrap(body: Body) -> Self {
         Self { body }
     }
 
@@ -174,7 +174,7 @@ impl<'data> Frame<'data> {
         )
     }
 
-    pub fn parse(i: In<'data>) -> IResult<Self> {
+    pub fn parse(i: In) -> IResult<Self> {
         use nm::*;
         let (i, header) = Header::parse(i)?;
         let (i, inner) = take(header.body_length)(i)?;

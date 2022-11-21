@@ -8,7 +8,7 @@ pub struct DisconnectRequest {
     control_endpoint: Hpai,
 }
 
-impl From<DisconnectRequest> for Body<'static> {
+impl From<DisconnectRequest> for Body {
     fn from(f: DisconnectRequest) -> Self {
         Body::DisconnectRequest(f)
     }
@@ -63,7 +63,7 @@ pub struct DisconnectResponse {
     state: DisconnectState,
 }
 
-impl From<DisconnectResponse> for Body<'static> {
+impl From<DisconnectResponse> for Body {
     fn from(f: DisconnectResponse) -> Self {
         Body::DisconnectResponse(f)
     }

@@ -1,6 +1,5 @@
 use std::{
     any::Any,
-    borrow::Borrow,
     net::{Ipv4Addr, SocketAddrV4, UdpSocket},
 };
 
@@ -42,9 +41,9 @@ impl SocketWrapper {
         })
     }
 
-    fn send_frame<'data, T>(&self, data: T) -> std::io::Result<()>
+    fn send_frame<T>(&self, data: T) -> std::io::Result<()>
     where
-        T: Into<Body<'data>> + Any,
+        T: Into<Body> + Any,
     {
         let body = data.into();
         let frame = Frame::wrap(body);
@@ -58,7 +57,7 @@ impl SocketWrapper {
         Ok(())
     }
 
-    fn receive_frame<'data>(&self, buf: &'data mut [u8]) -> std::io::Result<Frame<'data>> {
+    fn receive_frame(&self, buf: &mut [u8]) -> std::io::Result<Frame> {
         let (len, _addr) = self.socket.recv_from(buf).expect("Could not receive data.");
         //println!("Received {len} bytes from {_addr}.");
         println!("Incoming: {:?}", &buf[..len]);
@@ -75,8 +74,8 @@ fn main() -> std::io::Result<()> {
     let socket_wrapper = SocketWrapper::try_new()?;
 
     let connect_request = ConnectRequest::new(
-        socket_wrapper.control_ep.clone(),
-        socket_wrapper.data_ep.clone(),
+        socket_wrapper.control_ep,
+        socket_wrapper.data_ep,
         Cri::new_tunnel(KnxLayer::LinkLayer),
     );
     socket_wrapper.send_frame(connect_request)?;
@@ -91,7 +90,7 @@ fn main() -> std::io::Result<()> {
 
     let state_request = ConnectionStateRequest::new(
         connect_response.communication_channel_id,
-        socket_wrapper.control_ep.clone(),
+        socket_wrapper.control_ep,
     );
 
     socket_wrapper.send_frame(state_request)?;
@@ -122,7 +121,7 @@ fn main() -> std::io::Result<()> {
     let (data, _) = cookie_factory::gen(cemi.gen(), vec![]).unwrap();
     let message = TunnelingRequest {
         header: ConnectionHeader::new_empty(connect_response.communication_channel_id, 0),
-        cemi: data.into(),
+        cemi: data,
     };
 
     socket_wrapper.send_frame(message)?;
@@ -149,7 +148,7 @@ fn main() -> std::io::Result<()> {
         .connect(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT))?;
     let disconnect_request = DisconnectRequest::new(
         connect_response.communication_channel_id,
-        socket_wrapper.control_ep.clone(),
+        socket_wrapper.control_ep,
     );
     socket_wrapper.send_frame(disconnect_request)?;
 

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, convert::TryFrom, marker::PhantomData};
+use std::{convert::TryFrom, marker::PhantomData};
 
 use nom_derive::NomBE;
 
@@ -84,20 +84,20 @@ impl ConnectionHeader<()> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct TunnelingRequest<'data> {
+pub struct TunnelingRequest {
     pub header: ConnectionHeader<()>,
-    pub cemi: Cow<'data, [u8]>,
+    pub cemi: Vec<u8>,
 }
 
-impl<'data> TunnelingRequest<'data> {
-    pub fn new(communication_channel_id: u8, sequence_counter: u8, cemi: Cow<'data, [u8]>) -> Self {
+impl TunnelingRequest {
+    pub fn new(communication_channel_id: u8, sequence_counter: u8, cemi: Vec<u8>) -> Self {
         Self {
             header: ConnectionHeader::reserved(communication_channel_id, sequence_counter),
             cemi,
         }
     }
 
-    pub(crate) fn parse(i: In<'data>) -> IResult<Self> {
+    pub(crate) fn parse(i: In) -> IResult<Self> {
         use nm::*;
         context(
             stringify!(TunnelingRequest),
@@ -112,12 +112,12 @@ impl<'data> TunnelingRequest<'data> {
 
     pub(crate) fn gen<'a, W: Write + 'a>(&'a self) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        tuple((self.header.gen(), slice(self.cemi.as_ref())))
+        tuple((self.header.gen(), slice(&self.cemi[..])))
     }
 }
 
-impl<'data> From<TunnelingRequest<'data>> for Body<'data> {
-    fn from(f: TunnelingRequest<'data>) -> Self {
+impl From<TunnelingRequest> for Body {
+    fn from(f: TunnelingRequest) -> Self {
         Self::TunnelRequest(f)
     }
 }
@@ -162,7 +162,7 @@ impl TunnelingAck {
     }
 }
 
-impl From<TunnelingAck> for Body<'static> {
+impl From<TunnelingAck> for Body {
     fn from(f: TunnelingAck) -> Self {
         Body::TunnelAck(f)
     }

@@ -5,6 +5,7 @@ now has control endpoint (IP+Port) <---------- SEARCH_RESPONSE
 DESCRIPTION_REQUEST                ----------> to control endpoint
 now knows supported services       <---------- DESCRIPTION_RESPONSE
 
+(8.2.8 KNXnet/IP Core 5.2)
 CONNECT_REQUEST to ctrl ep         ----------> assigns connection id and individual address
 stores data ep                     <---------- CONNECT_RESPONSE
 
@@ -12,6 +13,7 @@ every 60 sec while any connection active (e.g. tunneling, mgmt, ...): keep alive
 CONNECTIONSTATE_REQUEST to ctrl ep ----------> Resets timeout
 Resets timeout                     <---------- CONNECTIONSTATE_RESPONSE
 
+(3.8.4 KNXnet/IP Tunneling 2.6)
 TUNNEL_REQUEST to data ep LData.req ----------> forwards to TP
 knows message arrived              <----------- TUNNEL_ACK
 receives confirmation for write    <----------- TUNNEL_REQUEST to data ep LData.con
