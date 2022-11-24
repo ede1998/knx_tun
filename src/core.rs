@@ -148,6 +148,48 @@ impl Body {
             }),
         )(i)
     }
+
+    pub(crate) fn unwrap_connect_request(self) -> ConnectRequest {
+        match self {
+            Body::ConnectRequest(d) => d,
+            body => panic!("Unexpected body {body:?}"),
+        }
+    }
+
+    pub(crate) fn unwrap_connect_response(self) -> ConnectResponse {
+        match self {
+            Body::ConnectResponse(d) => d,
+            body => panic!("Unexpected body {body:?}"),
+        }
+    }
+
+    pub(crate) fn unwrap_disconnect_response(self) -> DisconnectResponse {
+        match self {
+            Body::DisconnectResponse(d) => d,
+            body => panic!("Unexpected body {body:?}"),
+        }
+    }
+
+    pub(crate) fn unwrap_connection_state_response(self) -> ConnectionStateResponse {
+        match self {
+            Body::ConnectionStateResponse(d) => d,
+            body => panic!("Unexpected body {body:?}"),
+        }
+    }
+
+    pub(crate) fn unwrap_tunnel_ack(self) -> TunnelingAck {
+        match self {
+            Body::TunnelAck(d) => d,
+            body => panic!("Unexpected body {body:?}"),
+        }
+    }
+
+    pub(crate) fn unwrap_tunnel_request(self) -> TunnelingRequest {
+        match self {
+            Body::TunnelRequest(d) => d,
+            body => panic!("Unexpected body {body:?}"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]

@@ -6,6 +6,7 @@ use std::fmt::Display;
 pub use std::io::Write;
 
 pub type IResult<'a, O> = nom::IResult<In<'a>, O, nm::Error<In<'a>>>;
+pub type NomErr<T> = nom::Err<nm::Error<T>>;
 pub type IBitResult<'a, O> = nom::IResult<(In<'a>, usize), O, nm::Error<(In<'a>, usize)>>;
 pub type In<'a> = &'a [u8];
 
@@ -31,7 +32,7 @@ pub mod nm {
     use nom::{ErrorConvert, IResult, InputLength, InputTake, ToUsize};
     use std::fmt;
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy)]
     pub enum ErrorKind {
         Nom(NomErrorKind),
         Context(&'static str),
@@ -60,89 +61,128 @@ pub mod nm {
         }
     }
 
-    impl<'a> fmt::Debug for Error<In<'a>> {
-        /// Algorithm copied from https://fasterthanli.me/series/making-our-own-ping/part-9
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            writeln!(f, "/!\\ parsing error")?;
-
-            let mut shown_input = None;
-            let margin_left = 4;
-            let margin_str = " ".repeat(margin_left);
-
-            // maximum amount of binary data we'll dump per line
-            let maxlen = 60;
-
-            // given a big slice, an offset, and a length, attempt to show
-            // some data before, some data after, and highlight which part
-            // we're talking about with tildes.
-            let print_slice =
-                |f: &mut fmt::Formatter, s: In, offset: usize, len: usize| -> fmt::Result {
-                    // decide which part of `s` we're going to show.
-                    let (s, offset, len) = {
-                        // see diagram further in article.
-                        // TODO: review for off-by-one errors
-
-                        let avail_after = s.len() - offset;
-                        let after = std::cmp::min(avail_after, maxlen / 2);
-
-                        let avail_before = offset;
-                        let before = std::cmp::min(avail_before, maxlen / 2);
-
-                        let new_start = offset - before;
-                        let new_end = offset + after;
-                        let new_offset = before;
-                        let new_len = std::cmp::min(new_end - new_start, len);
-
-                        (&s[new_start..new_end], new_offset, new_len)
-                    };
-
-                    write!(f, "{}", margin_str)?;
-                    for b in s {
-                        write!(f, "{:02X} ", b)?;
-                    }
-                    writeln!(f)?;
-
-                    write!(f, "{}", margin_str)?;
-                    for i in 0..s.len() {
-                        // each byte takes three characters, ie "FF "
-                        if i == offset + len - 1 {
-                            // ..except the last one
-                            write!(f, "~~")?;
-                        } else if (offset..offset + len).contains(&i) {
-                            write!(f, "~~~")?;
-                        } else {
-                            write!(f, "   ")?;
-                        };
-                    }
-                    writeln!(f)?;
-
-                    Ok(())
-                };
-
-            for (input, kind) in self.errors.iter().rev() {
-                let prefix = match kind {
-                    ErrorKind::Context(ctx) => format!("...in {}", ctx),
-                    ErrorKind::Nom(err) => format!("nom error {:?}", err),
-                };
-
-                writeln!(f, "{}", prefix)?;
-                match shown_input {
-                    None => {
-                        shown_input.replace(input);
-                        print_slice(f, input, 0, input.len())?;
-                    }
-                    Some(parent_input) => {
-                        // `nom::Offset` is a trait that lets us get the position
-                        // of a subslice into its parent slice. This works great for
-                        // our error reporting!
-                        use nom::Offset;
-                        let offset = parent_input.offset(input);
-                        print_slice(f, parent_input, offset, input.len())?;
-                    }
-                };
+    impl<'a> From<Error<&'a [u8]>> for Error<Vec<u8>> {
+        fn from(f: Error<&'a [u8]>) -> Self {
+            Error {
+                errors: f
+                    .errors
+                    .into_iter()
+                    .map(|(input, error)| (input.to_owned(), error))
+                    .collect(),
             }
-            Ok(())
         }
+    }
+
+    impl<I> std::error::Error for Error<I> where Error<I>: fmt::Display + fmt::Debug {}
+
+    impl fmt::Display for Error<Vec<u8>> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            <Self as fmt::Debug>::fmt(self, f)
+        }
+    }
+
+    impl fmt::Debug for Error<Vec<u8>> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fmt(
+                self.errors
+                    .iter()
+                    .map(|(input, error)| (&input[..], *error)),
+                f,
+            )
+        }
+    }
+
+    impl<'a> fmt::Debug for Error<In<'a>> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fmt(self.errors.iter().copied(), f)
+        }
+    }
+
+    /// Algorithm copied from https://fasterthanli.me/series/making-our-own-ping/part-9
+    fn fmt<'a, I>(errors: I, f: &mut fmt::Formatter) -> fmt::Result
+    where
+        I: IntoIterator<Item = (&'a [u8], ErrorKind)>,
+        I::IntoIter: std::iter::DoubleEndedIterator,
+    {
+        writeln!(f, "/!\\ parsing error")?;
+
+        let mut shown_input = None;
+        let margin_left = 4;
+        let margin_str = " ".repeat(margin_left);
+
+        // maximum amount of binary data we'll dump per line
+        let maxlen = 60;
+
+        // given a big slice, an offset, and a length, attempt to show
+        // some data before, some data after, and highlight which part
+        // we're talking about with tildes.
+        let print_slice =
+            |f: &mut fmt::Formatter, s: In, offset: usize, len: usize| -> fmt::Result {
+                // decide which part of `s` we're going to show.
+                let (s, offset, len) = {
+                    // see diagram further in article.
+                    // TODO: review for off-by-one errors
+
+                    let avail_after = s.len() - offset;
+                    let after = std::cmp::min(avail_after, maxlen / 2);
+
+                    let avail_before = offset;
+                    let before = std::cmp::min(avail_before, maxlen / 2);
+
+                    let new_start = offset - before;
+                    let new_end = offset + after;
+                    let new_offset = before;
+                    let new_len = std::cmp::min(new_end - new_start, len);
+
+                    (&s[new_start..new_end], new_offset, new_len)
+                };
+
+                write!(f, "{}", margin_str)?;
+                for b in s {
+                    write!(f, "{:02X} ", b)?;
+                }
+                writeln!(f)?;
+
+                write!(f, "{}", margin_str)?;
+                for i in 0..s.len() {
+                    // each byte takes three characters, ie "FF "
+                    if i == offset + len - 1 {
+                        // ..except the last one
+                        write!(f, "~~")?;
+                    } else if (offset..offset + len).contains(&i) {
+                        write!(f, "~~~")?;
+                    } else {
+                        write!(f, "   ")?;
+                    };
+                }
+                writeln!(f)?;
+
+                Ok(())
+            };
+
+        for (input, kind) in errors.into_iter().rev() {
+            let prefix = match kind {
+                ErrorKind::Context(ctx) => format!("...in {}", ctx),
+                ErrorKind::Nom(err) => format!("nom error {:?}", err),
+            };
+
+            writeln!(f, "{}", prefix)?;
+            match shown_input {
+                None => {
+                    shown_input.replace(input);
+                    print_slice(f, input, 0, input.len())?;
+                }
+                Some(parent_input) => {
+                    // `nom::Offset` is a trait that lets us get the position
+                    // of a subslice into its parent slice. This works great for
+                    // our error reporting!
+                    use nom::Offset;
+                    let offset = parent_input.offset(input);
+                    print_slice(f, parent_input, offset, input.len())?;
+                }
+            };
+        }
+        Ok(())
     }
 
     impl<'a> ErrorConvert<Error<(In<'a>, usize)>> for Error<In<'a>> {

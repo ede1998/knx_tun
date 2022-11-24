@@ -179,4 +179,14 @@ mod tests {
         assert_eq!(0, rem.len());
         assert_eq!(actual, STRUCT_CEMI_IND_GROUP_VALUE_WRITE);
     }
+
+    #[test]
+    fn parse_cemi_panicked() {
+        let bytes = [
+            0x2e, 0x00, 0xb4, 0xe0, 0x71, 0x0a, 0x11, 0x14, 0x02, 0x00, 0x80, 0x01,
+        ];
+        let (i, cemi) = Cemi::parse(&bytes).unwrap();
+        assert!(i.is_empty());
+        assert_eq!(cemi.header.message_code, MessageCode::LDataCon);
+    }
 }

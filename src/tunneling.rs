@@ -1,6 +1,7 @@
 use std::{convert::TryFrom, marker::PhantomData};
 
 use nom_derive::NomBE;
+use num_enum::TryFromPrimitive;
 
 use crate::{core::Body, snack::*};
 
@@ -122,7 +123,7 @@ impl From<TunnelingRequest> for Body {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, NomBE, TryFromPrimitive)]
 #[nom(GenericErrors)]
 #[repr(u8)]
 pub enum TunnelingAckState {

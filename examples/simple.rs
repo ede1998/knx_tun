@@ -15,7 +15,7 @@ use knx_tun::{
     hpai::*,
     keep_alive::ConnectionStateRequest,
     snack::{U3, U5, U6},
-    tunneling::{ConnectionHeader, TunnelingRequest, TunnelingAck, TunnelingAckState},
+    tunneling::{ConnectionHeader, TunnelingAck, TunnelingAckState, TunnelingRequest},
 };
 
 const PORT: u16 = 3671;
@@ -140,7 +140,11 @@ fn main() -> std::io::Result<()> {
         b => panic!("Telegram of unexpected type {:#?}", b),
     };
 
-    let tunnel_ack = TunnelingAck::new(connect_response.communication_channel_id, tunnel_req.header.sequence_counter, TunnelingAckState::NoError);
+    let tunnel_ack = TunnelingAck::new(
+        connect_response.communication_channel_id,
+        tunnel_req.header.sequence_counter,
+        TunnelingAckState::NoError,
+    );
     socket_wrapper.send_frame(tunnel_ack)?;
 
     socket_wrapper

@@ -59,8 +59,8 @@ impl From<DisconnectState> for u8 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct DisconnectResponse {
-    communication_channel_id: u8,
-    state: DisconnectState,
+    pub communication_channel_id: u8,
+    pub state: DisconnectState,
 }
 
 impl From<DisconnectResponse> for Body {

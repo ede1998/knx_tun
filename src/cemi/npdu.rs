@@ -229,10 +229,10 @@ pub struct PayloadTooLarge;
 impl GroupData {
     pub(crate) fn parse(remainder: U6, i: In) -> IResult<Self> {
         use nm::*;
-        let data = if i.is_empty() {
+        let (i, payload) = rest(i)?;
+        let data = if payload.is_empty() {
             Self::with_small_payload(remainder)
         } else {
-            let (i, payload) = rest(i)?;
             Self::with_payload(payload)
                 .map_err(|_| Err::Error(make_error(i, NomErrorKind::TooLarge)))?
         };
