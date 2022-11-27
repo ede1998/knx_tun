@@ -2,6 +2,7 @@ use std::{
     collections::VecDeque,
     io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -164,6 +165,38 @@ impl ConnectionState {
     }
 }
 
+pub struct Receiver<'a> {
+    tunnel: Arc<Mutex<&'a mut TunnelConnection>>,
+    timeout: Duration,
+}
+
+impl<'a> Iterator for Receiver<'a> {
+    type Item = Option<Cemi>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut guard = self.tunnel.lock().unwrap();
+        match guard.receive_raw(self.timeout) {
+            Ok(cemi) => Some(Some(cemi)),
+            Err(ConnectionError::IoError(err)) if err.kind() == io::ErrorKind::TimedOut => {
+                // TODO handle timeout on tunnel level different than io timeouts.
+                Some(None)
+            }
+            _ => None,
+        }
+    }
+}
+
+pub struct Sender<'a> {
+    tunnel: Arc<Mutex<&'a mut TunnelConnection>>,
+}
+
+impl<'a> Sender<'a> {
+    pub fn send_raw(&self, cemi: Cemi) -> Result<(), ConnectionError> {
+        let mut guard = self.tunnel.lock().unwrap();
+        guard.send_raw(cemi)
+    }
+}
+
 #[derive(Debug)]
 pub struct TunnelConnection {
     state: ConnectionState,
@@ -179,6 +212,25 @@ const DISCONNECT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const TUNNELING_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl TunnelConnection {
+    pub fn bidirectional(
+        &mut self,
+        receive_timeout: Duration,
+    ) -> Result<(Sender, Receiver), ConnectionError> {
+        let ConnectionState::Connected(_) = self.state else {
+            panic!("TODO invalid state for method");
+        };
+
+        let borrow = Arc::new(Mutex::new(self));
+        let sender = Sender {
+            tunnel: borrow.clone(),
+        };
+        let receiver = Receiver {
+            tunnel: borrow,
+            timeout: receive_timeout,
+        };
+
+        Ok((sender, receiver))
+    }
     pub fn new() -> Result<Self, ConnectionError> {
         let (socket, local) = bind()?;
         Ok(Self {
@@ -202,8 +254,13 @@ impl TunnelConnection {
 
         self.socket.send_to(&frame, remote)?;
         self.state = ConnectionState::Connecting { control: remote };
-        self.maintain_until(CONNECT_REQUEST_TIMEOUT, Self::is_connected)?;
-        Ok(())
+        if self.maintain_until(CONNECT_REQUEST_TIMEOUT, Self::is_connected)? {
+            Ok(())
+        } else {
+            self.state = ConnectionState::NotConnected;
+            // TODO do it with proper errors
+            Err(io::Error::new(io::ErrorKind::TimedOut, "Failed to open connection").into())
+        }
     }
 
     pub fn send_raw(&mut self, cemi: Cemi) -> Result<(), ConnectionError> {

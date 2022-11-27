@@ -44,5 +44,6 @@ fn main() -> Result<(), ConnectionError> {
     tunnel_connection.keep_alive()?;
     sleep(std::time::Duration::from_secs(3));
     tunnel_connection.keep_alive()?;
+    sleep(std::time::Duration::from_secs(3));
     Ok(())
 }
