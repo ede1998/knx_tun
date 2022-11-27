@@ -4,8 +4,8 @@ use crate::{core::Body, hpai::Hpai, snack::*};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct DisconnectRequest {
-    communication_channel_id: u8,
-    control_endpoint: Hpai,
+    pub communication_channel_id: u8,
+    pub control_endpoint: Hpai,
 }
 
 impl From<DisconnectRequest> for Body {
