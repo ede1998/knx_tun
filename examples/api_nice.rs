@@ -1,6 +1,5 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
-    thread::sleep,
     time::Duration,
 };
 

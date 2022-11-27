@@ -37,131 +37,132 @@ impl<'a> From<NomErr<In<'a>>> for ConnectionError {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum KeepAliveState {
-    Assessing,
-    Alive { last_check: Instant },
-}
+mod states {
+    use std::{net::SocketAddrV4, time::Instant};
 
-impl Default for KeepAliveState {
-    fn default() -> Self {
-        Self::Alive {
-            last_check: Instant::now(),
-        }
+    #[derive(Debug, Clone, Copy)]
+    pub enum KeepAlive {
+        Assessing,
+        Alive { last_check: Instant },
     }
-}
 
-#[derive(Default, Debug, Clone, Copy)]
-enum TunnelSendState {
-    AwaitingReply {
-        sequence_counter: u8,
-    },
-    #[default]
-    Ready,
-}
-
-enum ReplyAction {
-    ProcessAndAck,
-    DiscardOnly { expected: u8 },
-    DiscardAndAck { expected: u8 },
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Channel {
-    id: u8,
-    recv_sequence: std::num::Wrapping<u8>,
-    send_sequence: std::num::Wrapping<u8>,
-}
-
-impl Channel {
-    const fn new(id: u8) -> Self {
-        Self {
-            id,
-            recv_sequence: std::num::Wrapping(0),
-            send_sequence: std::num::Wrapping(0),
+    impl Default for KeepAlive {
+        fn default() -> Self {
+            Self::Alive {
+                last_check: Instant::now(),
+            }
         }
     }
 
-    const fn id(&self) -> u8 {
-        self.id
+    #[derive(Default, Debug, Clone, Copy)]
+    pub enum TunnelSend {
+        AwaitingReply {
+            sequence_counter: u8,
+        },
+        #[default]
+        Ready,
     }
 
-    fn next_send_sequence(&mut self) -> u8 {
-        let seq = self.send_sequence;
-        self.send_sequence += 1;
-        seq.0
+    pub enum ReplyAction {
+        ProcessAndAck,
+        DiscardOnly { expected: u8 },
+        DiscardAndAck { expected: u8 },
     }
 
-    fn verify_recv_sequence(&mut self, received: u8) -> ReplyAction {
-        let expected = self.recv_sequence.0;
-        let expected_sub_1 = (self.recv_sequence - std::num::Wrapping(1)).0;
+    #[derive(Debug, Clone)]
+    pub struct Channel {
+        id: u8,
+        recv_sequence: std::num::Wrapping<u8>,
+        send_sequence: std::num::Wrapping<u8>,
+    }
 
-        if received == expected {
-            self.recv_sequence += 1;
-            ReplyAction::ProcessAndAck
-        } else if received == expected_sub_1 {
-            ReplyAction::DiscardAndAck { expected }
-        } else {
-            ReplyAction::DiscardOnly { expected }
+    impl Channel {
+        pub const fn new(id: u8) -> Self {
+            Self {
+                id,
+                recv_sequence: std::num::Wrapping(0),
+                send_sequence: std::num::Wrapping(0),
+            }
+        }
+
+        pub const fn id(&self) -> u8 {
+            self.id
+        }
+
+        pub fn next_send_sequence(&mut self) -> u8 {
+            let seq = self.send_sequence;
+            self.send_sequence += 1;
+            seq.0
+        }
+
+        pub fn verify_recv_sequence(&mut self, received: u8) -> ReplyAction {
+            let expected = self.recv_sequence.0;
+            let expected_sub_1 = (self.recv_sequence - std::num::Wrapping(1)).0;
+
+            if received == expected {
+                self.recv_sequence += 1;
+                ReplyAction::ProcessAndAck
+            } else if received == expected_sub_1 {
+                ReplyAction::DiscardAndAck { expected }
+            } else {
+                ReplyAction::DiscardOnly { expected }
+            }
         }
     }
-}
 
-#[derive(Debug, Clone, Copy)]
-struct Connected {
-    pub tunnel: TunnelSendState,
-    pub keep_alive: KeepAliveState,
-    pub control: SocketAddrV4,
-    pub data: SocketAddrV4,
-    pub channel: Channel,
-}
+    #[derive(Debug, Clone)]
+    pub struct Connected {
+        pub tunnel: TunnelSend,
+        pub keep_alive: KeepAlive,
+        pub control: SocketAddrV4,
+        pub data: SocketAddrV4,
+        pub channel: Channel,
+    }
 
-impl Connected {
-    fn to_disconnecting(self) -> Disconnecting {
-        let Self {
-            control,
-            channel,
-            data,
-            ..
-        } = self;
-        Disconnecting {
-            control,
-            channel,
-            data,
+    #[derive(Debug, Clone)]
+    pub struct Disconnecting {
+        pub control: SocketAddrV4,
+        pub data: SocketAddrV4,
+        pub channel: Channel,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Connecting {
+        pub control: SocketAddrV4,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum ConnectionState {
+        NotConnected,
+        Connecting(Connecting),
+        Connected(Connected),
+        Disconnecting(Disconnecting),
+    }
+
+    impl Default for ConnectionState {
+        fn default() -> Self {
+            Self::NotConnected
         }
     }
-}
 
-#[derive(Debug, Clone, Copy)]
-struct Disconnecting {
-    pub control: SocketAddrV4,
-    pub data: SocketAddrV4,
-    pub channel: Channel,
-}
+    impl ConnectionState {
+        pub fn connected(channel_id: u8, control: SocketAddrV4, data: SocketAddrV4) -> Self {
+            Self::Connected(Connected {
+                tunnel: TunnelSend::default(),
+                keep_alive: KeepAlive::default(),
+                control,
+                data,
+                channel: Channel::new(channel_id),
+            })
+        }
 
-#[derive(Debug, Clone)]
-enum ConnectionState {
-    NotConnected,
-    Connecting { control: SocketAddrV4 },
-    Connected(Connected),
-    Disconnecting(Disconnecting),
-}
-
-impl Default for ConnectionState {
-    fn default() -> Self {
-        Self::NotConnected
-    }
-}
-
-impl ConnectionState {
-    fn connected(channel_id: u8, control: SocketAddrV4, data: SocketAddrV4) -> Self {
-        Self::Connected(Connected {
-            tunnel: TunnelSendState::default(),
-            keep_alive: KeepAliveState::default(),
-            control,
-            data,
-            channel: Channel::new(channel_id),
-        })
+        pub fn disconnecting(connected: &Connected) -> Self {
+            Self::Disconnecting(Disconnecting {
+                control: connected.control,
+                channel: connected.channel.clone(),
+                data: connected.data,
+            })
+        }
     }
 }
 
@@ -196,6 +197,8 @@ impl<'a> Sender<'a> {
         guard.send_raw(cemi)
     }
 }
+
+use states::{Connected, Connecting, ConnectionState, Disconnecting};
 
 #[derive(Debug)]
 pub struct TunnelConnection {
@@ -253,7 +256,7 @@ impl TunnelConnection {
         ))?;
 
         self.socket.send_to(&frame, remote)?;
-        self.state = ConnectionState::Connecting { control: remote };
+        self.state = ConnectionState::Connecting(Connecting { control: remote });
         if self.maintain_until(CONNECT_REQUEST_TIMEOUT, Self::is_connected)? {
             Ok(())
         } else {
@@ -266,7 +269,7 @@ impl TunnelConnection {
     pub fn send_raw(&mut self, cemi: Cemi) -> Result<(), ConnectionError> {
         let (frame, dest) = match self.state {
             ConnectionState::Connected(ref mut state) => {
-                if let TunnelSendState::AwaitingReply { .. } = state.tunnel {
+                if let states::TunnelSend::AwaitingReply { .. } = state.tunnel {
                     panic!("TODO: handle sendstate awaiting reply")
                 }
                 trace!("Serializing {cemi:?}.");
@@ -282,7 +285,7 @@ impl TunnelConnection {
                 let data = state.data;
 
                 self.socket.send_to(&frame, data)?;
-                state.tunnel = TunnelSendState::AwaitingReply { sequence_counter };
+                state.tunnel = states::TunnelSend::AwaitingReply { sequence_counter };
 
                 (frame, data)
             }
@@ -326,7 +329,7 @@ impl TunnelConnection {
     pub fn keep_alive(&mut self) -> Result<(), ConnectionError> {
         let (frame, dest) = match self.state {
             ConnectionState::Connected(ref mut state) => {
-                let KeepAliveState::Alive { last_check } = state.keep_alive else {
+                let states::KeepAlive::Alive { last_check } = state.keep_alive else {
                     panic!("TODO: invalid keep alive state");
                 };
 
@@ -342,7 +345,7 @@ impl TunnelConnection {
                 let control = state.control;
 
                 self.socket.send_to(&frame, control)?;
-                state.keep_alive = KeepAliveState::Assessing;
+                state.keep_alive = states::KeepAlive::Assessing;
 
                 (frame, control)
             }
@@ -370,7 +373,7 @@ impl TunnelConnection {
         };
         let frame = serialize(DisconnectRequest::new(state.channel.id(), hpai(self.local)))?;
         self.socket.send_to(&frame, state.control)?;
-        self.state = ConnectionState::Disconnecting(state.to_disconnecting());
+        self.state = ConnectionState::disconnecting(state);
         if self.maintain_until(CONNECT_REQUEST_TIMEOUT, Self::is_disconnected)? {
             Ok(())
         } else {
@@ -404,7 +407,7 @@ impl TunnelConnection {
 
     fn maintain(&mut self, timeout: Duration) -> Result<(), ConnectionError> {
         if let ConnectionState::Connected(Connected {
-            keep_alive: KeepAliveState::Alive { .. },
+            keep_alive: states::KeepAlive::Alive { .. },
             ..
         }) = self.state
         {
@@ -422,7 +425,7 @@ impl TunnelConnection {
 
             let msg_len = match self.state {
                 ConnectionState::NotConnected => return Ok(()),
-                ConnectionState::Connecting { control, .. } => {
+                ConnectionState::Connecting(Connecting { control, .. }) => {
                     receive(&self.socket, &mut buf, &[control], remaining_time)?
                 }
                 ConnectionState::Connected(Connected { control, data, .. })
@@ -449,10 +452,10 @@ impl TunnelConnection {
 
     fn handle_message(&mut self, frame: Frame) -> Result<(), ConnectionError> {
         match (&mut self.state, frame.body) {
-            (ConnectionState::Connecting { control }, Body::ConnectResponse(r)) => {
+            (ConnectionState::Connecting(connected), Body::ConnectResponse(r)) => {
                 self.state = ConnectionState::connected(
                     r.communication_channel_id,
-                    *control,
+                    connected.control,
                     r.data_endpoint.address,
                 )
             }
@@ -486,15 +489,15 @@ impl TunnelConnection {
                 };
 
                 match channel.verify_recv_sequence(r.header.sequence_counter) {
-                    ReplyAction::ProcessAndAck => {
+                    states::ReplyAction::ProcessAndAck => {
                         let cemi = Cemi::parse(&r.cemi)?.1;
                         self.buffer.push_back(cemi);
                         send_ack()?;
                     }
-                    ReplyAction::DiscardOnly { expected } => {
+                    states::ReplyAction::DiscardOnly { expected } => {
                         debug!("Discarding message because of unexpected sequence number {}. Expected {expected}.", r.header.communication_channel_id);
                     }
-                    ReplyAction::DiscardAndAck { expected } => {
+                    states::ReplyAction::DiscardAndAck { expected } => {
                         debug!("Discarding message but sending ack because of unexpected sequence number {} is one less than expected value {expected}.", r.header.communication_channel_id);
                         send_ack()?;
                     }
@@ -518,14 +521,14 @@ impl TunnelConnection {
                 }
 
                 match tunnel {
-                    TunnelSendState::Ready => {
+                    states::TunnelSend::Ready => {
                         debug!("Ignoring tunneling ack because tunnel has no outstanding ack.");
                     }
-                    TunnelSendState::AwaitingReply { sequence_counter } => {
+                    states::TunnelSend::AwaitingReply { sequence_counter } => {
                         if a.0.sequence_counter != *sequence_counter {
                             debug!("Ignoring tunneling ack because it is for the sequence counter {} instead of {sequence_counter}.", a.0.sequence_counter);
                         } else {
-                            *tunnel = TunnelSendState::Ready;
+                            *tunnel = states::TunnelSend::Ready;
                         }
                     }
                 }
@@ -578,10 +581,10 @@ impl TunnelConnection {
                     return Ok(());
                 }
                 match keep_alive {
-                    KeepAliveState::Assessing => {
-                        *keep_alive = KeepAliveState::default();
+                    states::KeepAlive::Assessing => {
+                        *keep_alive = states::KeepAlive::default();
                     }
-                    KeepAliveState::Alive { .. } => {
+                    states::KeepAlive::Alive { .. } => {
                         debug!("Ignoring unexpected connection state response while not waiting for one.");
                     }
                 }
@@ -597,7 +600,7 @@ impl TunnelConnection {
         matches!(
             self.state,
             ConnectionState::Connected(Connected {
-                tunnel: TunnelSendState::Ready,
+                tunnel: states::TunnelSend::Ready,
                 ..
             })
         )
@@ -611,7 +614,7 @@ impl TunnelConnection {
         matches!(
             self.state,
             ConnectionState::Connected(Connected {
-                keep_alive: KeepAliveState::Alive { .. },
+                keep_alive: states::KeepAlive::Alive { .. },
                 ..
             })
         )
