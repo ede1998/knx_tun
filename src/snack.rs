@@ -599,6 +599,13 @@ impl<const N: u8> U<N> {
         U((lhs << M) | rhs)
     }
 
+    pub const fn split<const A: u8, const B: u8>(self) -> (U<A>, U<B>) {
+        assert!(A + B == N);
+        let a = self.0 >> B;
+        let b = self.0 & U::<B>::MAX_U8;
+        (U(a), U(b))
+    }
+
     pub const fn unwrap(data: u8) -> Self {
         match Self::new(data) {
             Ok(u) => u,

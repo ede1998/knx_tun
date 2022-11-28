@@ -205,14 +205,14 @@ impl Apdu {
             Apdu::GroupValueRead => {
                 bits([prefix_bits.into(), GROUP_VALUE_READ.into(), bits::u8(6, 0)])(out)
             }
-            Apdu::GroupValueResponse(gd) => pair(
-                bits([prefix_bits.into(), GROUP_VALUE_RESPONSE.into()]),
-                gd.gen(None),
-            )(out),
-            Apdu::GroupValueWrite(gd) => pair(
-                bits([prefix_bits.into(), GROUP_VALUE_WRITE.into()]),
-                gd.gen(None),
-            )(out),
+            Apdu::GroupValueResponse(gd) => {
+                let tag: (U2, U2) = GROUP_VALUE_RESPONSE.split();
+                pair(bits([prefix_bits.into(), tag.0.into()]), gd.gen(tag.1))(out)
+            }
+            Apdu::GroupValueWrite(gd) => {
+                let tag: (U2, U2) = GROUP_VALUE_WRITE.split();
+                pair(bits([prefix_bits.into(), tag.0.into()]), gd.gen(tag.1))(out)
+            }
         }
     }
 }
@@ -239,12 +239,8 @@ impl GroupData {
         Ok((i, data))
     }
 
-    pub(crate) fn gen<'a, W: Write + 'a>(
-        &'a self,
-        prefix_bits: Option<U2>,
-    ) -> impl SerializeFn<W> + 'a {
+    pub(crate) fn gen<'a, W: Write + 'a>(&'a self, prefix_bits: U2) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        let prefix_bits = prefix_bits.unwrap_or(U2::_0);
         move |out| match self.length {
             Length::SixBitOrLess => bits([prefix_bits.into(), bits::u8(6, self.data[0])])(out),
             Length::Bytes(len) => slice(&self.data[..len.into()])(out),
@@ -286,4 +282,21 @@ impl GroupData {
 enum Length {
     SixBitOrLess,
     Bytes(u8),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_small_payload() {
+        let data = GroupData::with_small_payload(U6::_1);
+
+        let (serialized, len) = cookie_factory::gen(data.gen(U2::_2), vec![]).unwrap();
+
+        assert_eq!(len, 1);
+        #[allow(clippy::unusual_byte_groupings)] // split by related bytes
+        const EXPECTED: u8 = 0b10_000001;
+        assert_eq!(serialized[0], EXPECTED);
+    }
 }
