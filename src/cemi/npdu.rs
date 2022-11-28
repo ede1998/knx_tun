@@ -159,9 +159,9 @@ impl Tpdu {
 mod apdu_prefix_kind {
     use crate::snack::U4;
 
-    pub const GROUP_VALUE_READ: U4 = U4::unwrap(0b0000);
-    pub const GROUP_VALUE_RESPONSE: U4 = U4::unwrap(0b0001);
-    pub const GROUP_VALUE_WRITE: U4 = U4::unwrap(0b0010);
+    pub const GROUP_VALUE_READ: U4 = U4::_0;
+    pub const GROUP_VALUE_RESPONSE: U4 = U4::_1;
+    pub const GROUP_VALUE_WRITE: U4 = U4::_2;
 }
 
 // TODO: split this type: only specific stuff belongs together,
@@ -244,7 +244,7 @@ impl GroupData {
         prefix_bits: Option<U2>,
     ) -> impl SerializeFn<W> + 'a {
         use cf::*;
-        let prefix_bits = prefix_bits.unwrap_or(U2::unwrap(0));
+        let prefix_bits = prefix_bits.unwrap_or(U2::_0);
         move |out| match self.length {
             Length::SixBitOrLess => bits([prefix_bits.into(), bits::u8(6, self.data[0])])(out),
             Length::Bytes(len) => slice(&self.data[..len.into()])(out),

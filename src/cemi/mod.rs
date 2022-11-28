@@ -158,7 +158,7 @@ mod tests {
             },
             control_2: Control2 {
                 destination_address: AddressKind::Group,
-                hop_count: U3::unwrap(6),
+                hop_count: U3::_6,
                 frame_format: FrameFormat::Standard,
             },
             source: Address::new(AddressKind::Individual, 0x11, 0x0b),
@@ -167,7 +167,7 @@ mod tests {
                 device: 0x01,
             },
             npdu: Npdu(Tpdu::DataGroup(Apdu::GroupValueWrite(
-                GroupData::with_small_payload(U6::unwrap(1)),
+                GroupData::with_small_payload(U6::_1),
             ))),
         }),
     };

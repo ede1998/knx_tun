@@ -314,8 +314,8 @@ mod tests {
         const CONTROL_2: u8 = 0b0_011_0110;
         let expected = Control2 {
             destination_address: AddressKind::Individual,
-            hop_count: U3::unwrap(3),
-            frame_format: FrameFormat::Lte(U2::unwrap(2)),
+            hop_count: U3::_3,
+            frame_format: FrameFormat::Lte(U2::_2),
         };
 
         let (i, ctrl2) = Control2::parse(&[CONTROL_2]).unwrap();
