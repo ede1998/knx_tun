@@ -21,6 +21,25 @@ use crate::{
     tunneling::{TunnelingAck, TunnelingAckState, TunnelingRequest},
 };
 
+#[derive(Clone, Copy, Debug)]
+pub enum State {
+    NotConnected,
+    Connecting,
+    Connected,
+    Disconnecting,
+}
+
+impl From<&ConnectionState> for State {
+    fn from(f: &ConnectionState) -> Self {
+        match f {
+            ConnectionState::NotConnected => Self::NotConnected,
+            ConnectionState::Connecting(_) => Self::Connecting,
+            ConnectionState::Connected(_) => Self::Connected,
+            ConnectionState::Disconnecting(_) => Self::Disconnecting,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ConnectionError {
     #[error("network error: {0}")]
@@ -29,11 +48,21 @@ pub enum ConnectionError {
     GenError(#[from] cookie_factory::GenError),
     #[error("could not parse packet: {0:?}")]
     ParseError(#[from] NomErr<Vec<u8>>),
+    #[error("Did not receive reply in time: {0}")]
+    TimeoutError(&'static str),
+    #[error("Method {0} is not allowed to be called in state {1:?}")]
+    InvalidOperation(&'static str, State),
 }
 
 impl<'a> From<NomErr<In<'a>>> for ConnectionError {
     fn from(f: NomErr<In<'a>>) -> Self {
         Self::ParseError(NomErr::<Vec<u8>>::convert(f))
+    }
+}
+
+impl ConnectionError {
+    fn invalid_operation(name: &'static str, state: &ConnectionState) -> Self {
+        ConnectionError::InvalidOperation(name, state.into())
     }
 }
 
@@ -163,6 +192,38 @@ mod states {
                 data: connected.data,
             })
         }
+
+        /// Returns `true` if the connection state is [`Disconnecting`].
+        ///
+        /// [`Disconnecting`]: ConnectionState::Disconnecting
+        #[must_use]
+        pub fn is_disconnecting(&self) -> bool {
+            matches!(self, Self::Disconnecting(..))
+        }
+
+        /// Returns `true` if the connection state is [`Connecting`].
+        ///
+        /// [`Connecting`]: ConnectionState::Connecting
+        #[must_use]
+        pub fn is_connecting(&self) -> bool {
+            matches!(self, Self::Connecting(..))
+        }
+
+        /// Returns `true` if the connection state is [`NotConnected`].
+        ///
+        /// [`NotConnected`]: ConnectionState::NotConnected
+        #[must_use]
+        pub fn is_not_connected(&self) -> bool {
+            matches!(self, Self::NotConnected)
+        }
+
+        /// Returns `true` if the connection state is [`Connected`].
+        ///
+        /// [`Connected`]: ConnectionState::Connected
+        #[must_use]
+        pub fn is_connected(&self) -> bool {
+            matches!(self, Self::Connected(..))
+        }
     }
 }
 
@@ -175,13 +236,10 @@ impl<'a> Iterator for Receiver<'a> {
     type Item = Option<Cemi>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut guard = self.tunnel.lock().unwrap();
+        let mut guard = self.tunnel.lock().expect("ensure mutex not poisoned");
         match guard.receive_raw(self.timeout) {
             Ok(cemi) => Some(Some(cemi)),
-            Err(ConnectionError::IoError(err)) if err.kind() == io::ErrorKind::TimedOut => {
-                // TODO handle timeout on tunnel level different than io timeouts.
-                Some(None)
-            }
+            Err(ConnectionError::TimeoutError(_)) => Some(None),
             _ => None,
         }
     }
@@ -193,7 +251,7 @@ pub struct Sender<'a> {
 
 impl<'a> Sender<'a> {
     pub fn send_raw(&self, cemi: Cemi) -> Result<(), ConnectionError> {
-        let mut guard = self.tunnel.lock().unwrap();
+        let mut guard = self.tunnel.lock().expect("ensure mutex not poisoned");
         guard.send_raw(cemi)
     }
 }
@@ -219,8 +277,11 @@ impl TunnelConnection {
         &mut self,
         receive_timeout: Duration,
     ) -> Result<(Sender, Receiver), ConnectionError> {
-        let ConnectionState::Connected(_) = self.state else {
-            panic!("TODO invalid state for method");
+        if !self.state.is_connected() {
+            return Err(ConnectionError::invalid_operation(
+                stringify!(bidirectional),
+                &self.state,
+            ));
         };
 
         let borrow = Arc::new(Mutex::new(self));
@@ -245,8 +306,11 @@ impl TunnelConnection {
     }
 
     pub fn open(&mut self, remote: SocketAddrV4) -> Result<(), ConnectionError> {
-        if !matches!(self.state, ConnectionState::NotConnected) {
-            panic!("TODO already connected");
+        if !self.state.is_not_connected() {
+            return Err(ConnectionError::invalid_operation(
+                stringify!(open),
+                &self.state,
+            ));
         }
 
         let frame = serialize(ConnectRequest::new(
@@ -261,8 +325,7 @@ impl TunnelConnection {
             Ok(())
         } else {
             self.state = ConnectionState::NotConnected;
-            // TODO do it with proper errors
-            Err(io::Error::new(io::ErrorKind::TimedOut, "Failed to open connection").into())
+            Err(ConnectionError::TimeoutError("Failed to open connection"))
         }
     }
 
@@ -270,7 +333,14 @@ impl TunnelConnection {
         let (frame, dest) = match self.state {
             ConnectionState::Connected(ref mut state) => {
                 if let states::TunnelSend::AwaitingReply { .. } = state.tunnel {
-                    panic!("TODO: handle sendstate awaiting reply")
+                    // This cannot happen (because of the exclusive reference and
+                    // because if no ack is received, the connection would have been closed
+                    // before returning control to the caller) UNLESS sending/receiving
+                    // errors out while waiting for the ack.
+                    // It's also not very important to keep this around as we only log
+                    // that the ack was unexpected if it's received later.
+                    debug!("Resetting left-over TunnelSend::AwaitingReply flag.");
+                    state.tunnel = states::TunnelSend::Ready;
                 }
                 trace!("Serializing {cemi:?}.");
                 let cemi = cookie_factory::gen_simple(cemi.gen(), vec![])?;
@@ -289,7 +359,12 @@ impl TunnelConnection {
 
                 (frame, data)
             }
-            _ => panic!("TODO: handle not connected/connecting/disconnecting"),
+            ref state => {
+                return Err(ConnectionError::invalid_operation(
+                    stringify!(send_raw),
+                    state,
+                ))
+            }
         };
 
         if self.maintain_until(TUNNELING_REQUEST_TIMEOUT, Self::is_tunnel_ready)? {
@@ -304,25 +379,24 @@ impl TunnelConnection {
     }
 
     pub fn receive_raw(&mut self, timeout: Duration) -> Result<Cemi, ConnectionError> {
-        let ConnectionState::Connected {..} = self.state else {
-            panic!("TODO: handle not connected/connecting/disconnecting");
-        };
+        if !self.state.is_connected() {
+            return Err(ConnectionError::invalid_operation(
+                stringify!(receive_raw),
+                &self.state,
+            ));
+        }
 
         match self.buffer.pop_front() {
             Some(cemi) => {
                 self.maintain(Duration::ZERO)?;
                 Ok(cemi)
             }
-            None => self
-                .maintain_until(timeout, Self::received_cemi)
-                .and_then(|_received_cemi| {
-                    self.buffer.pop_front().ok_or_else(|| {
-                        ConnectionError::IoError(io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            "Did not receive CEMI message within set timeout.",
-                        ))
-                    })
-                }),
+            None => {
+                self.maintain_until(timeout, Self::received_cemi)?;
+                self.buffer.pop_front().ok_or(ConnectionError::TimeoutError(
+                    "Did not receive CEMI message within set timeout.",
+                ))
+            }
         }
     }
 
@@ -330,7 +404,12 @@ impl TunnelConnection {
         let (frame, dest) = match self.state {
             ConnectionState::Connected(ref mut state) => {
                 let states::KeepAlive::Alive { last_check } = state.keep_alive else {
-                    panic!("TODO: invalid keep alive state");
+                    // Still waiting for a keep alive should not happen. Something
+                    // went wrong in a previous call, maybe a send/recv error'ed
+                    // out after sending the keep alive
+                    debug!("Resetting left-over KeepAlive::Assessing flag.");
+                    state.keep_alive = states::KeepAlive::default();
+                    return Ok(());
                 };
 
                 if last_check.elapsed() < CONNECTION_STATE_REQUEST_INTERVAL {
@@ -349,7 +428,12 @@ impl TunnelConnection {
 
                 (frame, control)
             }
-            ConnectionState::NotConnected => panic!("Not connected yet TODO"),
+            ConnectionState::NotConnected => {
+                return Err(ConnectionError::invalid_operation(
+                    stringify!(keep_alive),
+                    &self.state,
+                ))
+            }
             _ => {
                 return Ok(());
             }
@@ -369,7 +453,7 @@ impl TunnelConnection {
         let state = match self.state {
             ConnectionState::Connected(ref mut state) => state,
             ConnectionState::NotConnected => return Ok(()),
-            _ => panic!("TODO: handle not connected/connecting/disconnecting"),
+            ref state => return Err(ConnectionError::invalid_operation(stringify!(close), state)),
         };
         let frame = serialize(DisconnectRequest::new(state.channel.id(), hpai(self.local)))?;
         self.socket.send_to(&frame, state.control)?;
@@ -377,11 +461,9 @@ impl TunnelConnection {
         if self.maintain_until(CONNECT_REQUEST_TIMEOUT, Self::is_disconnected)? {
             Ok(())
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::TimedOut,
+            Err(ConnectionError::TimeoutError(
                 "Did not receive disconnect response within timeout.",
-            )
-            .into())
+            ))
         }
     }
 
@@ -632,8 +714,7 @@ impl TunnelConnection {
 impl Drop for TunnelConnection {
     fn drop(&mut self) {
         match self.close() {
-            Err(ConnectionError::IoError(e)) if e.kind() == std::io::ErrorKind::TimedOut => {}
-            Ok(_) => {}
+            Err(ConnectionError::TimeoutError(_)) | Ok(_) => {}
             Err(e) => warn!("Failed to close tunnel connection: {e}"),
         }
     }
