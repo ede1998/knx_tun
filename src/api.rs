@@ -2,19 +2,21 @@ use std::{
     collections::VecDeque,
     io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use cookie_factory::GenError;
 use thiserror::Error;
 use tracing::{debug, trace, warn};
 
 use crate::{
     cemi::Cemi,
     connect::{ConnectRequest, Cri, KnxLayer, TunnelRequest},
-    core::{Body, Frame, ServiceType},
-    disconnect::{DisconnectRequest, DisconnectState},
+    core::{Body, Frame},
+    disconnect::{DisconnectRequest, DisconnectResponse, DisconnectState},
     hpai::{HostProtocolCode, Hpai},
-    keep_alive::{ConnectionState, ConnectionStateRequest},
+    keep_alive::ConnectionStateRequest,
     snack::{In, NomErr},
     tunneling::{TunnelingAck, TunnelingAckState, TunnelingRequest},
 };
@@ -35,175 +37,595 @@ impl<'a> From<NomErr<In<'a>>> for ConnectionError {
     }
 }
 
+mod states {
+    use std::{net::SocketAddrV4, time::Instant};
+
+    #[derive(Debug, Clone, Copy)]
+    pub enum KeepAlive {
+        Assessing,
+        Alive { last_check: Instant },
+    }
+
+    impl Default for KeepAlive {
+        fn default() -> Self {
+            Self::Alive {
+                last_check: Instant::now(),
+            }
+        }
+    }
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub enum TunnelSend {
+        AwaitingReply {
+            sequence_counter: u8,
+        },
+        #[default]
+        Ready,
+    }
+
+    pub enum ReplyAction {
+        ProcessAndAck,
+        DiscardOnly { expected: u8 },
+        DiscardAndAck { expected: u8 },
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Channel {
+        id: u8,
+        recv_sequence: std::num::Wrapping<u8>,
+        send_sequence: std::num::Wrapping<u8>,
+    }
+
+    impl Channel {
+        pub const fn new(id: u8) -> Self {
+            Self {
+                id,
+                recv_sequence: std::num::Wrapping(0),
+                send_sequence: std::num::Wrapping(0),
+            }
+        }
+
+        pub const fn id(&self) -> u8 {
+            self.id
+        }
+
+        pub fn next_send_sequence(&mut self) -> u8 {
+            let seq = self.send_sequence;
+            self.send_sequence += 1;
+            seq.0
+        }
+
+        pub fn verify_recv_sequence(&mut self, received: u8) -> ReplyAction {
+            let expected = self.recv_sequence.0;
+            let expected_sub_1 = (self.recv_sequence - std::num::Wrapping(1)).0;
+
+            if received == expected {
+                self.recv_sequence += 1;
+                ReplyAction::ProcessAndAck
+            } else if received == expected_sub_1 {
+                ReplyAction::DiscardAndAck { expected }
+            } else {
+                ReplyAction::DiscardOnly { expected }
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Connected {
+        pub tunnel: TunnelSend,
+        pub keep_alive: KeepAlive,
+        pub control: SocketAddrV4,
+        pub data: SocketAddrV4,
+        pub channel: Channel,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Disconnecting {
+        pub control: SocketAddrV4,
+        pub data: SocketAddrV4,
+        pub channel: Channel,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Connecting {
+        pub control: SocketAddrV4,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum ConnectionState {
+        NotConnected,
+        Connecting(Connecting),
+        Connected(Connected),
+        Disconnecting(Disconnecting),
+    }
+
+    impl Default for ConnectionState {
+        fn default() -> Self {
+            Self::NotConnected
+        }
+    }
+
+    impl ConnectionState {
+        pub fn connected(channel_id: u8, control: SocketAddrV4, data: SocketAddrV4) -> Self {
+            Self::Connected(Connected {
+                tunnel: TunnelSend::default(),
+                keep_alive: KeepAlive::default(),
+                control,
+                data,
+                channel: Channel::new(channel_id),
+            })
+        }
+
+        pub fn disconnecting(connected: &Connected) -> Self {
+            Self::Disconnecting(Disconnecting {
+                control: connected.control,
+                channel: connected.channel.clone(),
+                data: connected.data,
+            })
+        }
+    }
+}
+
+pub struct Receiver<'a> {
+    tunnel: Arc<Mutex<&'a mut TunnelConnection>>,
+    timeout: Duration,
+}
+
+impl<'a> Iterator for Receiver<'a> {
+    type Item = Option<Cemi>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut guard = self.tunnel.lock().unwrap();
+        match guard.receive_raw(self.timeout) {
+            Ok(cemi) => Some(Some(cemi)),
+            Err(ConnectionError::IoError(err)) if err.kind() == io::ErrorKind::TimedOut => {
+                // TODO handle timeout on tunnel level different than io timeouts.
+                Some(None)
+            }
+            _ => None,
+        }
+    }
+}
+
+pub struct Sender<'a> {
+    tunnel: Arc<Mutex<&'a mut TunnelConnection>>,
+}
+
+impl<'a> Sender<'a> {
+    pub fn send_raw(&self, cemi: Cemi) -> Result<(), ConnectionError> {
+        let mut guard = self.tunnel.lock().unwrap();
+        guard.send_raw(cemi)
+    }
+}
+
+use states::{Connected, Connecting, ConnectionState, Disconnecting};
+
+#[derive(Debug)]
 pub struct TunnelConnection {
-    socket: Socket,
-    channel_id: u8,
-    last_keep_alive: Instant,
+    state: ConnectionState,
+    socket: UdpSocket,
+    local: SocketAddrV4,
+    buffer: VecDeque<Cemi>,
 }
 
 const CONNECT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const CONNECTION_STATE_REQUEST_INTERVAL: Duration = Duration::from_secs(60);
+const CONNECTION_STATE_REQUEST_INTERVAL: Duration = Duration::from_secs(2);
 const CONNECTION_STATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const DISCONNECT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const TUNNELING_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl TunnelConnection {
-    pub fn open(remote: SocketAddrV4) -> Result<Self, ConnectionError> {
-        let mut socket = UnconnectedSocket::new(remote)?;
+    pub fn bidirectional(
+        &mut self,
+        receive_timeout: Duration,
+    ) -> Result<(Sender, Receiver), ConnectionError> {
+        let ConnectionState::Connected(_) = self.state else {
+            panic!("TODO invalid state for method");
+        };
 
-        socket.send_control(ConnectRequest::new(
-            socket.local_hpai(),
-            socket.local_hpai(),
-            Cri::Tunnel(TunnelRequest::new(KnxLayer::LinkLayer)),
-        ))?;
+        let borrow = Arc::new(Mutex::new(self));
+        let sender = Sender {
+            tunnel: borrow.clone(),
+        };
+        let receiver = Receiver {
+            tunnel: borrow,
+            timeout: receive_timeout,
+        };
 
-        let reply = socket
-            .receive(CONNECT_REQUEST_TIMEOUT, ServiceType::ConnectResponse)?
-            .unwrap_connect_response();
-        let socket = socket.with_data(reply.data_endpoint.address);
-
-        Ok(TunnelConnection {
+        Ok((sender, receiver))
+    }
+    pub fn new() -> Result<Self, ConnectionError> {
+        let (socket, local) = bind()?;
+        Ok(Self {
+            state: Default::default(),
             socket,
-            channel_id: reply.communication_channel_id,
-            last_keep_alive: Instant::now(),
+            local,
+            buffer: VecDeque::new(),
         })
     }
 
+    pub fn open(&mut self, remote: SocketAddrV4) -> Result<(), ConnectionError> {
+        if !matches!(self.state, ConnectionState::NotConnected) {
+            panic!("TODO already connected");
+        }
+
+        let frame = serialize(ConnectRequest::new(
+            hpai(self.local),
+            hpai(self.local),
+            Cri::Tunnel(TunnelRequest::new(KnxLayer::LinkLayer)),
+        ))?;
+
+        self.socket.send_to(&frame, remote)?;
+        self.state = ConnectionState::Connecting(Connecting { control: remote });
+        if self.maintain_until(CONNECT_REQUEST_TIMEOUT, Self::is_connected)? {
+            Ok(())
+        } else {
+            self.state = ConnectionState::NotConnected;
+            // TODO do it with proper errors
+            Err(io::Error::new(io::ErrorKind::TimedOut, "Failed to open connection").into())
+        }
+    }
+
     pub fn send_raw(&mut self, cemi: Cemi) -> Result<(), ConnectionError> {
-        self.keep_alive()?;
-        let result = self.socket.retry(1, |socket| {
-            let data = match cookie_factory::gen_simple(cemi.gen(), vec![]) {
-                Ok(data) => data,
-                Err(e) => return Action::Finished(Err(e.into())),
-            };
-            if let Err(e) = socket.send_data(TunnelingRequest::new(self.channel_id, 0, data)) {
-                return Action::Finished(Err(e));
-            }
-
-            let reply = match socket.receive(TUNNELING_REQUEST_TIMEOUT, ServiceType::TunnelResponse) {
-                Ok(reply) => reply.unwrap_tunnel_ack(),
-                Err(e) => return Action::Finished(Err(e)),
-            };
-
-            if reply.0.communication_channel_id != self.channel_id {
-                warn!("Server sent connection state response for unexpected communication channel {} instead of {}.", reply.0.communication_channel_id, self.channel_id);
-                return Action::Retry;
-            }
-
-            // TODO sequence number handling
-
-            match reply.0.data() {
-                Ok(TunnelingAckState::NoError) => Action::Finished(Ok(())),
-                Err(state) => {
-                    debug!(
-                    "Server sent invalid tunneling ack state {state:?} for channel {}",
-                    self.channel_id
-                );
-                Action::Retry
+        let (frame, dest) = match self.state {
+            ConnectionState::Connected(ref mut state) => {
+                if let states::TunnelSend::AwaitingReply { .. } = state.tunnel {
+                    panic!("TODO: handle sendstate awaiting reply")
                 }
-            }
-        });
+                trace!("Serializing {cemi:?}.");
+                let cemi = cookie_factory::gen_simple(cemi.gen(), vec![])?;
 
-        match result {
-            Ok(r) => r,
-            Err(_) => self.close(),
+                let sequence_counter = state.channel.next_send_sequence();
+                let frame = serialize(TunnelingRequest::new(
+                    state.channel.id(),
+                    sequence_counter,
+                    cemi,
+                ))?;
+
+                let data = state.data;
+
+                self.socket.send_to(&frame, data)?;
+                state.tunnel = states::TunnelSend::AwaitingReply { sequence_counter };
+
+                (frame, data)
+            }
+            _ => panic!("TODO: handle not connected/connecting/disconnecting"),
+        };
+
+        if self.maintain_until(TUNNELING_REQUEST_TIMEOUT, Self::is_tunnel_ready)? {
+            return Ok(());
+        }
+        self.socket.send_to(&frame, dest)?;
+        if self.maintain_until(TUNNELING_REQUEST_TIMEOUT, Self::is_tunnel_ready)? {
+            Ok(())
+        } else {
+            self.close()
         }
     }
 
     pub fn receive_raw(&mut self, timeout: Duration) -> Result<Cemi, ConnectionError> {
-        self.keep_alive()?;
-        let request = self
-            .socket
-            .receive(timeout, ServiceType::TunnelRequest)?
-            .unwrap_tunnel_request();
-        if request.header.communication_channel_id != self.channel_id {
-            warn!(
-                "Server sent tunnel request for unexpected communication channel {} instead of {}.",
-                request.header.communication_channel_id, self.channel_id
-            );
-            unimplemented!()
-            //return Err(ConnectionError::IoError(std::io::Error::new(std::io::ErrorKind::)))
+        let ConnectionState::Connected {..} = self.state else {
+            panic!("TODO: handle not connected/connecting/disconnecting");
+        };
+
+        match self.buffer.pop_front() {
+            Some(cemi) => {
+                self.maintain(Duration::ZERO)?;
+                Ok(cemi)
+            }
+            None => self
+                .maintain_until(timeout, Self::received_cemi)
+                .and_then(|_received_cemi| {
+                    self.buffer.pop_front().ok_or_else(|| {
+                        ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "Did not receive CEMI message within set timeout.",
+                        ))
+                    })
+                }),
         }
-        // TODO seq counter handling
-        self.socket.send_data(TunnelingAck::new(
-            self.channel_id,
-            request.header.sequence_counter,
-            TunnelingAckState::NoError,
-        ))?;
-        Ok(Cemi::parse(&request.cemi)?.1)
     }
 
     pub fn keep_alive(&mut self) -> Result<(), ConnectionError> {
-        if self.last_keep_alive.elapsed() < CONNECTION_STATE_REQUEST_INTERVAL {
-            return Ok(());
-        }
+        let (frame, dest) = match self.state {
+            ConnectionState::Connected(ref mut state) => {
+                let states::KeepAlive::Alive { last_check } = state.keep_alive else {
+                    panic!("TODO: invalid keep alive state");
+                };
 
-        self.last_keep_alive = Instant::now();
-
-        let result = self.socket.retry(3, |socket| {
-            if let Err(e) = socket.send_control(ConnectionStateRequest::new(
-                self.channel_id,
-                socket.local_hpai(),
-            )) {
-                return Action::Finished(Err(e));
-            }
-
-            let reply = match socket.receive(CONNECTION_STATE_REQUEST_TIMEOUT, ServiceType::ConnectionStateResponse) {
-                Err(e) => return Action::Finished(Err(e)),
-                Ok(reply) => reply.unwrap_connection_state_response(),
-            };
-
-            if reply.communication_channel_id != self.channel_id {
-                warn!("Server sent connection state response for unexpected communication channel {} instead of {}.", reply.communication_channel_id, self.channel_id);
-                return Action::Retry;
-            }
-
-            match reply.state {
-                ConnectionState::NoError => Action::Finished(Ok(())),
-                state => {
-                    debug!(
-                    "Server sent connection state response with state {state:?} for channel {}",
-                    self.channel_id
-                );
-                Action::Retry
+                if last_check.elapsed() < CONNECTION_STATE_REQUEST_INTERVAL {
+                    return Ok(());
                 }
+
+                let frame = serialize(ConnectionStateRequest::new(
+                    state.channel.id(),
+                    hpai(self.local),
+                ))?;
+
+                let control = state.control;
+
+                self.socket.send_to(&frame, control)?;
+                state.keep_alive = states::KeepAlive::Assessing;
+
+                (frame, control)
             }
-        });
+            ConnectionState::NotConnected => panic!("Not connected yet TODO"),
+            _ => {
+                return Ok(());
+            }
+        };
 
-        match result {
-            Err(_) => self.close(),
-            Ok(r) => r,
+        for _ in 0..3 {
+            if self.maintain_until(CONNECTION_STATE_REQUEST_TIMEOUT, Self::still_alive)? {
+                return Ok(());
+            }
+            self.socket.send_to(&frame, dest)?;
         }
-    }
 
-    pub fn disconnect(mut self) -> Result<(), ConnectionError> {
-        // must split into 2 function because drop only takes &mut self not self
         self.close()
     }
 
-    fn close(&mut self) -> Result<(), ConnectionError> {
-        self.socket.send_control(DisconnectRequest::new(
-            self.channel_id,
-            self.socket.local_hpai(),
-        ))?;
+    pub fn close(&mut self) -> Result<(), ConnectionError> {
+        let state = match self.state {
+            ConnectionState::Connected(ref mut state) => state,
+            ConnectionState::NotConnected => return Ok(()),
+            _ => panic!("TODO: handle not connected/connecting/disconnecting"),
+        };
+        let frame = serialize(DisconnectRequest::new(state.channel.id(), hpai(self.local)))?;
+        self.socket.send_to(&frame, state.control)?;
+        self.state = ConnectionState::disconnecting(state);
+        if self.maintain_until(CONNECT_REQUEST_TIMEOUT, Self::is_disconnected)? {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Did not receive disconnect response within timeout.",
+            )
+            .into())
+        }
+    }
 
-        let reply = self
-            .socket
-            .receive(DISCONNECT_REQUEST_TIMEOUT, ServiceType::DisconnectResponse)?
-            .unwrap_disconnect_response();
+    fn maintain_until<F>(
+        &mut self,
+        timeout: Duration,
+        state_reached: F,
+    ) -> Result<bool, ConnectionError>
+    where
+        F: Fn(&Self) -> bool,
+    {
+        let start = Instant::now();
+        let mut remaining_time = Duration::MAX; // ensure one iteration
+        while remaining_time > Duration::ZERO {
+            remaining_time = timeout.saturating_sub(start.elapsed());
+            self.maintain(remaining_time)?;
+            if state_reached(self) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 
-        if reply.communication_channel_id != self.channel_id {
-            warn!("Server terminated connection for unexpected communication channel id {} instead of {}.", reply.communication_channel_id, self.channel_id);
+    fn maintain(&mut self, timeout: Duration) -> Result<(), ConnectionError> {
+        if let ConnectionState::Connected(Connected {
+            keep_alive: states::KeepAlive::Alive { .. },
+            ..
+        }) = self.state
+        {
+            self.keep_alive()?;
         }
 
-        if reply.state != DisconnectState::NoError {
-            warn!(
-                "Server indicated error {:?} while trying to disconnect.",
-                reply.state
-            );
-        }
+        let mut buf = [0; 1000];
+        let start = Instant::now();
+        let mut remaining_time = Duration::MAX;
+        let frame = loop {
+            if remaining_time.is_zero() {
+                return Ok(());
+            };
+            remaining_time = timeout.saturating_sub(start.elapsed());
 
+            let msg_len = match self.state {
+                ConnectionState::NotConnected => return Ok(()),
+                ConnectionState::Connecting(Connecting { control, .. }) => {
+                    receive(&self.socket, &mut buf, &[control], remaining_time)?
+                }
+                ConnectionState::Connected(Connected { control, data, .. })
+                | ConnectionState::Disconnecting(Disconnecting { control, data, .. }) => {
+                    receive(&self.socket, &mut buf, &[control, data], remaining_time)?
+                }
+            };
+
+            let Some(msg_len) = msg_len else { continue; };
+
+            match Frame::parse(&buf[..msg_len]) {
+                Ok((_, frame)) => break frame,
+                Err(err) => {
+                    debug!("Failed to parse incoming frame: {}", err);
+                    continue;
+                }
+            };
+        };
+
+        trace!("Received {frame:?}");
+
+        self.handle_message(frame)
+    }
+
+    fn handle_message(&mut self, frame: Frame) -> Result<(), ConnectionError> {
+        match (&mut self.state, frame.body) {
+            (ConnectionState::Connecting(connected), Body::ConnectResponse(r)) => {
+                self.state = ConnectionState::connected(
+                    r.communication_channel_id,
+                    connected.control,
+                    r.data_endpoint.address,
+                )
+            }
+            (
+                ConnectionState::Connected(Connected {
+                    data,
+                    ref mut channel,
+                    ..
+                }),
+                Body::TunnelRequest(r),
+            ) => {
+                if channel.id() != r.header.communication_channel_id {
+                    debug!(
+                        "Ignoring tunneling request for unknown channel id {}. Expected {}.",
+                        channel.id(),
+                        r.header.communication_channel_id
+                    );
+                    return Ok(());
+                }
+
+                let channel_id = channel.id();
+                let send_ack = || -> Result<(), ConnectionError> {
+                    let frame = serialize(TunnelingAck::new(
+                        channel_id,
+                        r.header.sequence_counter,
+                        TunnelingAckState::NoError,
+                    ))?;
+
+                    self.socket.send_to(&frame, *data)?;
+                    Ok(())
+                };
+
+                match channel.verify_recv_sequence(r.header.sequence_counter) {
+                    states::ReplyAction::ProcessAndAck => {
+                        let cemi = Cemi::parse(&r.cemi)?.1;
+                        self.buffer.push_back(cemi);
+                        send_ack()?;
+                    }
+                    states::ReplyAction::DiscardOnly { expected } => {
+                        debug!("Discarding message because of unexpected sequence number {}. Expected {expected}.", r.header.communication_channel_id);
+                    }
+                    states::ReplyAction::DiscardAndAck { expected } => {
+                        debug!("Discarding message but sending ack because of unexpected sequence number {} is one less than expected value {expected}.", r.header.communication_channel_id);
+                        send_ack()?;
+                    }
+                }
+            }
+            (
+                ConnectionState::Connected(Connected {
+                    ref mut tunnel,
+                    channel,
+                    ..
+                }),
+                Body::TunnelAck(a),
+            ) => {
+                if channel.id() != a.0.communication_channel_id {
+                    debug!(
+                        "Ignoring tunneling request for unknown channel id {}. Expected {}.",
+                        channel.id(),
+                        a.0.communication_channel_id
+                    );
+                    return Ok(());
+                }
+
+                match tunnel {
+                    states::TunnelSend::Ready => {
+                        debug!("Ignoring tunneling ack because tunnel has no outstanding ack.");
+                    }
+                    states::TunnelSend::AwaitingReply { sequence_counter } => {
+                        if a.0.sequence_counter != *sequence_counter {
+                            debug!("Ignoring tunneling ack because it is for the sequence counter {} instead of {sequence_counter}.", a.0.sequence_counter);
+                        } else {
+                            *tunnel = states::TunnelSend::Ready;
+                        }
+                    }
+                }
+            }
+            (ConnectionState::Connected(Connected { channel, .. }), Body::DisconnectRequest(r)) => {
+                if channel.id() != r.communication_channel_id {
+                    debug!(
+                        "Ignoring tunneling request for unknown channel id {}. Expected {}.",
+                        channel.id(),
+                        r.communication_channel_id
+                    );
+                    return Ok(());
+                }
+                let channel_id = channel.id();
+                self.state = ConnectionState::NotConnected;
+                let frame = serialize(DisconnectResponse::new(
+                    channel_id,
+                    DisconnectState::NoError,
+                ))?;
+                self.socket.send_to(&frame, r.control_endpoint.address)?;
+            }
+            (
+                ConnectionState::Disconnecting(Disconnecting { channel, .. }),
+                Body::DisconnectResponse(r),
+            ) => {
+                if channel.id() != r.communication_channel_id {
+                    debug!(
+                        "Ignoring tunneling response for unknown channel id {}. Expected {}.",
+                        channel.id(),
+                        r.communication_channel_id
+                    );
+                    return Ok(());
+                }
+                self.state = ConnectionState::NotConnected;
+            }
+            (
+                ConnectionState::Connected(Connected {
+                    ref mut keep_alive,
+                    channel,
+                    ..
+                }),
+                Body::ConnectionStateResponse(r),
+            ) => {
+                if channel.id() != r.communication_channel_id {
+                    debug!(
+                        "Ignoring tunneling response for unknown channel id {}. Expected {}.",
+                        channel.id(),
+                        r.communication_channel_id
+                    );
+                    return Ok(());
+                }
+                match keep_alive {
+                    states::KeepAlive::Assessing => {
+                        *keep_alive = states::KeepAlive::default();
+                    }
+                    states::KeepAlive::Alive { .. } => {
+                        debug!("Ignoring unexpected connection state response while not waiting for one.");
+                    }
+                }
+            }
+            (state, body) => {
+                debug!("Ignoring unexpectedly received {body:?} while in state {state:?}")
+            }
+        }
         Ok(())
+    }
+
+    fn is_tunnel_ready(&self) -> bool {
+        matches!(
+            self.state,
+            ConnectionState::Connected(Connected {
+                tunnel: states::TunnelSend::Ready,
+                ..
+            })
+        )
+    }
+
+    fn received_cemi(&self) -> bool {
+        !self.buffer.is_empty()
+    }
+
+    fn still_alive(&self) -> bool {
+        matches!(
+            self.state,
+            ConnectionState::Connected(Connected {
+                keep_alive: states::KeepAlive::Alive { .. },
+                ..
+            })
+        )
+    }
+
+    fn is_disconnected(&self) -> bool {
+        matches!(self.state, ConnectionState::NotConnected)
+    }
+
+    fn is_connected(&self) -> bool {
+        matches!(self.state, ConnectionState::Connected { .. })
     }
 }
 
@@ -217,171 +639,52 @@ impl Drop for TunnelConnection {
     }
 }
 
-enum Action<T> {
-    Finished(T),
-    Retry,
-}
-
-enum RetryResult<T> {
-    RetriesExceeded,
-    Result(T),
-}
-
-#[derive(Debug)]
-struct UnconnectedSocket {
-    socket: UdpSocket,
-    local: SocketAddrV4,
-    control: SocketAddrV4,
-    buffer: VecDeque<Body>,
-}
-
-#[derive(Debug)]
-struct Socket {
-    socket: UnconnectedSocket,
-    data: SocketAddrV4,
-}
-
-impl UnconnectedSocket {
-    fn new(remote_control_endpoint: SocketAddrV4) -> io::Result<Self> {
-        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))?;
-
-        let local = match socket.local_addr()? {
-            SocketAddr::V4(ep) => ep,
-            SocketAddr::V6(ep) => {
-                panic!("Bound UdpSocket to IpV4 addr but it reported being bound to {ep}");
-            }
-        };
-
-        Ok(UnconnectedSocket {
-            socket,
-            local,
-            buffer: VecDeque::new(),
-            control: remote_control_endpoint,
-        })
+fn hpai(address: SocketAddrV4) -> Hpai {
+    Hpai {
+        protocol_code: HostProtocolCode::Ipv4Udp,
+        address,
     }
+}
 
-    fn with_data(self, remote_data_endpoint: SocketAddrV4) -> Socket {
-        Socket {
-            socket: self,
-            data: remote_data_endpoint,
+fn receive(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+    endpoints: &[SocketAddrV4],
+    timeout: Duration,
+) -> Result<Option<usize>, std::io::Error> {
+    let timeout = timeout.max(Duration::new(0, 1));
+    socket.set_read_timeout(Some(timeout))?;
+    match socket.recv_from(buf) {
+        Ok((len, SocketAddr::V4(sender))) if endpoints.contains(&sender) => Ok(Some(len)),
+        Ok((len, sender)) => {
+            debug!("Ignoring message of {len} bytes from unexpected sender {sender}.");
+            Ok(None)
         }
-    }
-
-    fn send(&self, body: Body, endpoint: SocketAddrV4) -> Result<(), ConnectionError> {
-        let frame = Frame::wrap(body);
-        trace!("Sending {frame:?} to {endpoint}.");
-        let buf = cookie_factory::gen_simple(frame.gen(), vec![])?;
-        self.socket.send_to(&buf, endpoint)?;
-        Ok(())
-    }
-
-    fn receive(
-        &mut self,
-        timeout: Duration,
-        service: ServiceType,
-    ) -> Result<Body, ConnectionError> {
-        self.receive_from(timeout, service, &[self.control])
-    }
-
-    fn receive_from(
-        &mut self,
-        timeout: Duration,
-        service: ServiceType,
-        endpoints: &[SocketAddrV4],
-    ) -> Result<Body, ConnectionError> {
-        if let Some(index) = self
-            .buffer
-            .iter()
-            .position(|body| body.as_service_type() == service)
-        {
-            return Ok(self
-                .buffer
-                .remove(index)
-                .expect("invalid index but just found it in buffer"));
-        }
-
-        let start = Instant::now();
-        let mut remainder = timeout;
-
-        while start.elapsed() <= timeout {
-            let mut buf = [0; u16::MAX as usize];
-            self.socket.set_read_timeout(Some(remainder))?;
-            let (size, sender) = self.socket.recv_from(&mut buf[..])?;
-
-            if size > buf.len() {
-                warn!(
-                    "Message larger than provided buffer. Lost {} bytes of data.",
-                    size - buf.len()
-                );
-            }
-
-            match sender {
-                SocketAddr::V4(addr) if endpoints.contains(&addr) => {
-                    let frame = Frame::parse(&buf[..size])?.1;
-                    trace!("Received {frame:?} from {addr}.");
-                    if frame.body.as_service_type() == service {
-                        return Ok(frame.body);
-                    }
-                    self.buffer.push_back(frame.body);
-                }
-                addr => {
-                    warn!(
-                        "Ignoring message from wrong endpoint {addr}: {:?}",
-                        &buf[..size]
-                    );
-                }
-            }
-
-            remainder -= start.elapsed();
-        }
-
-        Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            format!("Receive timeout of {} seconds exceeded", timeout.as_secs()),
-        )
-        .into())
-    }
-
-    fn send_control(&self, body: impl Into<Body>) -> Result<(), ConnectionError> {
-        self.send(body.into(), self.control)
-    }
-
-    fn local_hpai(&self) -> Hpai {
-        Hpai::new(HostProtocolCode::Ipv4Udp, self.local)
-    }
-}
-
-impl Socket {
-    fn send_control(&self, body: impl Into<Body>) -> Result<(), ConnectionError> {
-        self.socket.send(body.into(), self.socket.control)
-    }
-
-    fn send_data(&self, body: impl Into<Body>) -> Result<(), ConnectionError> {
-        self.socket.send(body.into(), self.data)
-    }
-
-    fn receive(
-        &mut self,
-        timeout: Duration,
-        service: ServiceType,
-    ) -> Result<Body, ConnectionError> {
-        self.socket
-            .receive_from(timeout, service, &[self.data, self.socket.control])
-    }
-
-    fn local_hpai(&self) -> Hpai {
-        self.socket.local_hpai()
-    }
-
-    fn retry<F, T>(&mut self, max_retries: u32, mut f: F) -> Result<T, ()>
-    where
-        F: FnMut(&mut Self) -> Action<T>,
-    {
-        for _ in 0..=max_retries {
-            if let Action::Finished(r) = f(self) {
-                return Ok(r);
+        Err(e) => {
+            let kind = e.kind();
+            if kind == io::ErrorKind::TimedOut || kind == io::ErrorKind::WouldBlock {
+                Ok(None)
+            } else {
+                Err(e)
             }
         }
-        Err(())
     }
+}
+
+fn bind() -> std::io::Result<(UdpSocket, SocketAddrV4)> {
+    let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))?;
+
+    let local = match socket.local_addr()? {
+        SocketAddr::V4(ep) => ep,
+        SocketAddr::V6(ep) => {
+            panic!("Bound UdpSocket to IpV4 addr but it reported being bound to {ep}");
+        }
+    };
+    Ok((socket, local))
+}
+
+fn serialize<B: Into<Body>>(body: B) -> Result<Vec<u8>, GenError> {
+    let frame = Frame::wrap(body.into());
+    trace!("Serializing {frame:?}.");
+    cookie_factory::gen_simple(frame.gen(), vec![])
 }
