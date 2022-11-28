@@ -1,25 +1,22 @@
-use std::io::Write;
-
-use cookie_factory::GenError;
-
 use super::general::DataPointType;
-use crate::snack::{self, IResult, In};
+use crate::{
+    cemi::GroupData,
+    snack::{self, In, NomErr, U1},
+};
 
-fn parse<T>(i: In) -> IResult<T>
+fn parse<T>(i: In) -> Result<T, NomErr<In>>
 where
     T: From<bool>,
 {
     use snack::nm::*;
-    map(bits(pair(bit_u8(7), bool)), |(_, b)| b.into())(i)
+    map(bits(tuple((bit_u8(7), bool, eof))), |(_, b, _)| b.into())(i).map(|(_, out)| out)
 }
 
-fn gen_into<T, W>(b: T, out: W) -> Result<(W, u64), GenError>
+fn to_data<T>(b: T) -> GroupData
 where
-    T: Into<bool>,
-    W: Write,
+    T: Into<U1>,
 {
-    use snack::cf::*;
-    cookie_factory::gen(bits([bits::u8(7, 0), bits::bool(b.into())]), out)
+    GroupData::with_small_payload(b.into().widen())
 }
 
 macro_rules! impl_data_point_type {
@@ -51,17 +48,28 @@ macro_rules! impl_data_point_type {
             }
         }
 
+        impl From<$ty> for U1 {
+            fn from(s: $ty) -> Self {
+                let s: bool = s.into();
+                if s {
+                    U1::_1
+                } else {
+                    U1::_0
+                }
+            }
+        }
+
         impl DataPointType for $ty {
             const MAIN_NUMBER: u16 = 1;
             const SUB_NUMBER: u16 = $sub_number;
-            const LESS_THAN_A_BYTE: bool = true;
 
-            fn parse(i: In) -> IResult<Self> {
-                parse(i)
+            type ParseError<'a> = NomErr<&'a [u8]>;
+            fn from_data<'a>(group_data: &'a GroupData) -> Result<Self, Self::ParseError<'a>> {
+                parse(group_data.get())
             }
 
-            fn gen_into<W: Write>(&self, out: W) -> Result<(W, u64), GenError> {
-                gen_into(*self, out)
+            fn to_data(&self) -> GroupData {
+                to_data(*self)
             }
         }
     };
@@ -96,14 +104,14 @@ impl From<bool> for Trigger {
 impl DataPointType for Trigger {
     const MAIN_NUMBER: u16 = 1;
     const SUB_NUMBER: u16 = 17;
-    const LESS_THAN_A_BYTE: bool = true;
 
-    fn parse(i: In) -> IResult<Self> {
-        parse(i)
+    type ParseError<'a> = NomErr<In<'a>>;
+    fn from_data<'a>(group_data: &'a GroupData) -> Result<Self, Self::ParseError<'a>> {
+        parse(group_data.get())
     }
 
-    fn gen_into<W: Write>(&self, out: W) -> Result<(W, u64), GenError> {
-        gen_into(true, out)
+    fn to_data(&self) -> GroupData {
+        to_data(true)
     }
 }
 

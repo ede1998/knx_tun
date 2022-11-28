@@ -1,11 +1,10 @@
-use std::io::Write;
-
-use cookie_factory::GenError;
-
 use super::{dpt01::*, general::DataPointType};
-use crate::snack::{self, IResult, In};
+use crate::{
+    cemi::GroupData,
+    snack::{self, In, NomErr, U1},
+};
 
-pub trait BaseFunction: DataPointType + Into<bool> + From<bool> + Copy {}
+pub trait BaseFunction: DataPointType + Into<U1> + From<bool> + Copy {}
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct Control<D: BaseFunction> {
@@ -13,32 +12,28 @@ pub struct Control<D: BaseFunction> {
     pub function: D,
 }
 
-impl<D: BaseFunction> DataPointType for Control<D> {
+impl<D: BaseFunction + 'static> DataPointType for Control<D> {
     const MAIN_NUMBER: u16 = 2;
     const SUB_NUMBER: u16 = D::SUB_NUMBER;
-    const LESS_THAN_A_BYTE: bool = true;
 
-    fn parse(i: In) -> IResult<Self> {
+    type ParseError<'a> = NomErr<In<'a>>;
+
+    fn from_data<'a>(group_data: &'a GroupData) -> Result<Self, Self::ParseError<'a>> {
         use snack::nm::*;
         map(
-            bits(tuple((bit_u8(6), bool, bool))),
-            |(_, has_control, b)| Self {
+            bits(tuple((bit_u8(6), bool, bool, eof))),
+            |(_, has_control, b, _)| Self {
                 has_control,
                 function: b.into(),
             },
-        )(i)
+        )(group_data.get())
+        .map(|(_, out)| out)
     }
 
-    fn gen_into<W: Write>(&self, out: W) -> Result<(W, u64), GenError> {
-        use snack::cf::*;
-        cookie_factory::gen(
-            bits([
-                bits::u8(6, 0),
-                bits::bool(self.has_control),
-                bits::bool(self.function.into()),
-            ]),
-            out,
-        )
+    fn to_data(&self) -> GroupData {
+        let ctl: U1 = self.has_control.into();
+        let function: U1 = self.function.into();
+        GroupData::with_small_payload(ctl.chain(function))
     }
 }
 

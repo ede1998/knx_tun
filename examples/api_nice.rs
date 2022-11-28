@@ -8,11 +8,9 @@ use tracing::{info, metadata::LevelFilter};
 use knx_tun::{
     address::{Address, RawAddress},
     api::*,
-    cemi::{
-        AdditionalInformation, Apdu, Cemi, CemiBody, CemiHeader, GroupData, LData, MessageCode,
-        Tpdu,
-    },
-    snack::{U3, U5, U6},
+    cemi::{AdditionalInformation, Apdu, Cemi, CemiBody, CemiHeader, LData, MessageCode, Tpdu},
+    dpt::{dpt01::Switch, general::DataPointType},
+    snack::{U3, U5},
 };
 
 const PORT: u16 = 3671;
@@ -40,9 +38,7 @@ fn main() -> Result<(), ConnectionError> {
                     body: CemiBody::LData(LData::new(
                         RawAddress::ZERO,
                         Address::group(U5::_2, U3::_1, 20),
-                        Tpdu::DataGroup(Apdu::GroupValueWrite(GroupData::with_small_payload(
-                            U6::_1,
-                        ))),
+                        Tpdu::DataGroup(Apdu::GroupValueWrite(Switch::On.to_data())),
                     )),
                 };
 

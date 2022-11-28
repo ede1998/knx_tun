@@ -4,9 +4,12 @@ use super::{
     dpt01::{Step, UpDown},
     general::DataPointType,
 };
-use crate::snack::{self, GenError, IResult, In, U3};
+use crate::{
+    cemi::GroupData,
+    snack::{self, GenError, In, NomErr, U1, U3},
+};
 
-fn parse<T, F, A>(i: In, mut mapper: F) -> IResult<T>
+fn parse<T, F, A>(i: In, mut mapper: F) -> Result<T, NomErr<In>>
 where
     F: FnMut(A, StepCode) -> T,
     A: From<bool>,
@@ -15,6 +18,7 @@ where
     map(bits(tuple((bit_u8(4), bool, U3::parse))), |(_, b, u3)| {
         mapper(b.into(), u3.into())
     })(i)
+    .map(|(_, out)| out)
 }
 
 fn gen_into<T, W>(b: T, step_code: StepCode, out: W) -> Result<(W, u64), GenError>
@@ -105,14 +109,17 @@ impl ControlDimming {
 impl DataPointType for ControlDimming {
     const MAIN_NUMBER: u16 = 3;
     const SUB_NUMBER: u16 = Step::SUB_NUMBER;
-    const LESS_THAN_A_BYTE: bool = true;
 
-    fn parse(i: In) -> IResult<Self> {
-        parse(i, Self::new)
+    type ParseError<'a> = NomErr<In<'a>>;
+
+    fn from_data<'a>(group_data: &'a GroupData) -> Result<Self, Self::ParseError<'a>> {
+        parse(group_data.get(), Self::new)
     }
 
-    fn gen_into<W: std::io::Write>(&self, out: W) -> Result<(W, u64), GenError> {
-        gen_into(self.action, self.step_code, out)
+    fn to_data(&self) -> GroupData {
+        let step: U1 = self.action.into();
+        let step_code = self.step_code.into();
+        GroupData::with_small_payload(step.chain::<3, 4>(step_code).widen())
     }
 }
 
@@ -131,13 +138,16 @@ impl ControlBlinds {
 impl DataPointType for ControlBlinds {
     const MAIN_NUMBER: u16 = 3;
     const SUB_NUMBER: u16 = UpDown::SUB_NUMBER;
-    const LESS_THAN_A_BYTE: bool = true;
 
-    fn parse(i: In) -> IResult<Self> {
-        parse(i, Self::new)
+    type ParseError<'a> = NomErr<In<'a>>;
+
+    fn from_data<'a>(group_data: &'a GroupData) -> Result<Self, Self::ParseError<'a>> {
+        parse(group_data.get(), Self::new)
     }
 
-    fn gen_into<W: std::io::Write>(&self, out: W) -> Result<(W, u64), GenError> {
-        gen_into(self.action, self.step_code, out)
+    fn to_data(&self) -> GroupData {
+        let step: U1 = self.action.into();
+        let step_code = self.step_code.into();
+        GroupData::with_small_payload(step.chain::<3, 4>(step_code).widen())
     }
 }

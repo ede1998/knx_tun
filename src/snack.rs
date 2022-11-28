@@ -606,6 +606,11 @@ impl<const N: u8> U<N> {
         (U(a), U(b))
     }
 
+    pub const fn widen<const M: u8>(self) -> U<M> {
+        assert!(M >= N);
+        U(self.0)
+    }
+
     pub const fn unwrap(data: u8) -> Self {
         match Self::new(data) {
             Ok(u) => u,
@@ -616,6 +621,12 @@ impl<const N: u8> U<N> {
     pub(crate) fn parse(i: (In, usize)) -> IBitResult<Self> {
         use nm::*;
         map(bit_u8(N), Self)(i)
+    }
+}
+
+impl From<bool> for U1 {
+    fn from(f: bool) -> Self {
+        U(f.into())
     }
 }
 
