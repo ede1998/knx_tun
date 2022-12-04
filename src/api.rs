@@ -66,6 +66,13 @@ impl ConnectionError {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("Sender and receiver belong to different connections.")]
+pub struct SenderReceiverMismatch {
+    sender: Sender,
+    receiver: Receiver,
+}
+
 mod states {
     use std::{net::SocketAddrV4, time::Instant};
 
@@ -227,12 +234,13 @@ mod states {
     }
 }
 
-pub struct Receiver<'a> {
-    tunnel: Arc<Mutex<&'a mut TunnelConnection>>,
+#[derive(Debug)]
+pub struct Receiver {
+    tunnel: Arc<Mutex<TunnelConnection>>,
     timeout: Duration,
 }
 
-impl<'a> Iterator for Receiver<'a> {
+impl Iterator for Receiver {
     type Item = Option<Cemi>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -245,11 +253,12 @@ impl<'a> Iterator for Receiver<'a> {
     }
 }
 
-pub struct Sender<'a> {
-    tunnel: Arc<Mutex<&'a mut TunnelConnection>>,
+#[derive(Debug)]
+pub struct Sender {
+    tunnel: Arc<Mutex<TunnelConnection>>,
 }
 
-impl<'a> Sender<'a> {
+impl Sender {
     pub fn send_raw(&self, cemi: Cemi) -> Result<(), ConnectionError> {
         let mut guard = self.tunnel.lock().expect("ensure mutex not poisoned");
         guard.send_raw(cemi)
@@ -274,27 +283,42 @@ const TUNNELING_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl TunnelConnection {
     pub fn bidirectional(
-        &mut self,
+        self,
         receive_timeout: Duration,
-    ) -> Result<(Sender, Receiver), ConnectionError> {
+    ) -> Result<(Sender, Receiver), (Box<Self>, ConnectionError)> {
         if !self.state.is_connected() {
-            return Err(ConnectionError::invalid_operation(
-                stringify!(bidirectional),
-                &self.state,
-            ));
+            let err = ConnectionError::invalid_operation(stringify!(bidirectional), &self.state);
+            return Err((self.into(), err));
         };
 
-        let borrow = Arc::new(Mutex::new(self));
+        let tunnel = Arc::new(Mutex::new(self));
         let sender = Sender {
-            tunnel: borrow.clone(),
+            tunnel: tunnel.clone(),
         };
         let receiver = Receiver {
-            tunnel: borrow,
+            tunnel,
             timeout: receive_timeout,
         };
 
         Ok((sender, receiver))
     }
+
+    pub fn from_bidirectional(
+        sender: Sender,
+        receiver: Receiver,
+    ) -> Result<Self, SenderReceiverMismatch> {
+        if !Arc::ptr_eq(&sender.tunnel, &receiver.tunnel) {
+            return Err(SenderReceiverMismatch { sender, receiver });
+        }
+
+        drop(receiver);
+
+        Ok(Arc::try_unwrap(sender.tunnel)
+            .expect("only 1 of 2 owners left: sender because receiver was dropped")
+            .into_inner()
+            .expect("ensure mutex not poisoned"))
+    }
+
     pub fn new() -> Result<Self, ConnectionError> {
         let (socket, local) = bind()?;
         Ok(Self {

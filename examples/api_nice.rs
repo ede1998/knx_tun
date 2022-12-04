@@ -25,7 +25,9 @@ fn main() -> Result<(), ConnectionError> {
     let mut tunnel_connection = TunnelConnection::new()?;
     tunnel_connection.open(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT))?;
 
-    let (sender, receiver) = tunnel_connection.bidirectional(Duration::from_secs(10))?;
+    let (sender, receiver) = tunnel_connection
+        .bidirectional(Duration::from_secs(10))
+        .map_err(|(_, e)| e)?;
 
     for cemi in receiver {
         match cemi {
