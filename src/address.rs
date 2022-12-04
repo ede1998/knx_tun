@@ -41,6 +41,72 @@ impl RawAddress {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct GroupAddress(RawAddress);
+
+impl From<RawAddress> for GroupAddress {
+    fn from(f: RawAddress) -> Self {
+        Self(f)
+    }
+}
+
+impl TryFrom<Address> for GroupAddress {
+    type Error = Address;
+
+    fn try_from(value: Address) -> Result<Self, Self::Error> {
+        match value.kind {
+            AddressKind::Group => Ok(Self(value.address)),
+            AddressKind::Individual => Err(value),
+        }
+    }
+}
+
+impl From<GroupAddress> for Address {
+    fn from(f: GroupAddress) -> Self {
+        Address {
+            kind: AddressKind::Group,
+            address: f.0,
+        }
+    }
+}
+
+impl GroupAddress {
+    pub const fn new(area: U5, line: U3, device: u8) -> Self {
+        Self(RawAddress {
+            subnet: area.chain::<3, 8>(line).as_u8(),
+            device,
+        })
+    }
+
+    pub fn area(&self) -> U5 {
+        U5::unwrap(self.0.subnet >> 3)
+    }
+
+    pub fn line(&self) -> U3 {
+        U3::unwrap(self.0.subnet & 0b111)
+    }
+
+    pub fn device(&self) -> u8 {
+        self.0.device
+    }
+
+    pub fn subnet(&self) -> u8 {
+        self.0.subnet
+    }
+}
+
+impl PartialEq<Address> for GroupAddress {
+    fn eq(&self, other: &Address) -> bool {
+        other.kind == AddressKind::Group && self.0 == other.address
+    }
+}
+
+impl PartialEq<GroupAddress> for Address {
+    fn eq(&self, other: &GroupAddress) -> bool {
+        other == self
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Address {
     kind: AddressKind,

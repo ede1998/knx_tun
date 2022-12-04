@@ -1,7 +1,7 @@
 use cookie_factory::BackToTheBuffer;
 use nom_derive::NomBE;
 
-use crate::snack::*;
+use crate::{address::Address, snack::*};
 pub use ldata::*;
 pub use npdu::*;
 
@@ -67,6 +67,13 @@ impl Cemi {
         use cf::*;
         let CemiBody::LData(body) = &self.body;
         pair(self.header.gen(), body.gen())
+    }
+
+    pub fn address(&self) -> Address {
+        let crate::cemi::CemiBody::LData(ldata) = &self.body;
+        let kind = ldata.control_2.destination_address;
+        let raw = ldata.destination;
+        Address::from_raw(kind, raw)
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
