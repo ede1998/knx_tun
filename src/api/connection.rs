@@ -223,6 +223,17 @@ mod states {
         pub fn is_connected(&self) -> bool {
             matches!(self, Self::Connected(..))
         }
+
+        #[must_use]
+        pub fn last_alive_check(&self) -> Option<Instant> {
+            match self {
+                ConnectionState::Connected(Connected {
+                    keep_alive: KeepAlive::Alive { last_check },
+                    ..
+                }) => Some(*last_check),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -237,7 +248,7 @@ pub struct TunnelConnection {
 }
 
 const CONNECT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const CONNECTION_STATE_REQUEST_INTERVAL: Duration = Duration::from_secs(2);
+const CONNECTION_STATE_REQUEST_INTERVAL: Duration = Duration::from_secs(60);
 const CONNECTION_STATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const DISCONNECT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const TUNNELING_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
@@ -425,22 +436,32 @@ impl TunnelConnection {
     {
         let start = Instant::now();
         let mut remaining_time = Duration::MAX; // ensure one iteration
+
+        let since_last_keep_alive = self
+            .state
+            .last_alive_check()
+            .map(|last_check| last_check.elapsed());
+
+        let mut max_timeout_in_iteration = since_last_keep_alive
+            .and_then(|time_passed| CONNECTION_STATE_REQUEST_INTERVAL.checked_sub(time_passed))
+            .unwrap_or(CONNECTION_STATE_REQUEST_INTERVAL);
+
         while remaining_time > Duration::ZERO {
             remaining_time = timeout.saturating_sub(start.elapsed());
-            self.maintain(remaining_time)?;
+
+            self.maintain(remaining_time.min(max_timeout_in_iteration))?;
             if state_reached(self) {
                 return Ok(true);
             }
+
+            // do another loop iteration at least once every 60s to ensure keep alive is sent regularly
+            max_timeout_in_iteration = CONNECTION_STATE_REQUEST_INTERVAL;
         }
         Ok(false)
     }
 
     fn maintain(&mut self, timeout: Duration) -> Result<(), ConnectionError> {
-        if let ConnectionState::Connected(Connected {
-            keep_alive: states::KeepAlive::Alive { .. },
-            ..
-        }) = self.state
-        {
+        if self.state.last_alive_check().is_some() {
             self.keep_alive()?;
         }
 
