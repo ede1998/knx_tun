@@ -38,6 +38,7 @@ pub mod nm {
         Context(&'static str),
     }
 
+    #[derive(Clone)]
     pub struct Error<I> {
         pub errors: Vec<(I, ErrorKind)>,
     }

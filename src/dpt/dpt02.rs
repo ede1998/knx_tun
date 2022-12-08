@@ -1,4 +1,7 @@
-use super::{dpt01::*, general::DataPointType};
+use super::{
+    dpt01::*,
+    general::{DataPointId, DataPointType},
+};
 use crate::{
     cemi::GroupData,
     snack::{self, In, NomErr, U1},
@@ -13,8 +16,7 @@ pub struct Control<D: BaseFunction> {
 }
 
 impl<D: BaseFunction + 'static> DataPointType for Control<D> {
-    const MAIN_NUMBER: u16 = 2;
-    const SUB_NUMBER: u16 = D::SUB_NUMBER;
+    const ID: DataPointId = DataPointId::new(2, D::ID.sub);
 
     type ParseError<'a> = NomErr<In<'a>>;
 

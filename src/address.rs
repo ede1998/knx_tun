@@ -107,6 +107,12 @@ impl PartialEq<GroupAddress> for Address {
     }
 }
 
+impl std::fmt::Display for GroupAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}/{}/{}", self.area(), self.line(), self.device(),)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Address {
     kind: AddressKind,
@@ -245,7 +251,7 @@ impl FromStr for Address {
 }
 
 impl std::fmt::Display for Address {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let sep = match self.kind {
             AddressKind::Group => '/',
             AddressKind::Individual => '.',

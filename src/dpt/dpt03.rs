@@ -2,7 +2,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use super::{
     dpt01::{Step, UpDown},
-    general::DataPointType,
+    general::{DataPointId, DataPointType},
 };
 use crate::{
     cemi::GroupData,
@@ -107,8 +107,7 @@ impl ControlDimming {
 }
 
 impl DataPointType for ControlDimming {
-    const MAIN_NUMBER: u16 = 3;
-    const SUB_NUMBER: u16 = Step::SUB_NUMBER;
+    const ID: DataPointId = DataPointId::new(3, Step::ID.sub);
 
     type ParseError<'a> = NomErr<In<'a>>;
 
@@ -136,8 +135,7 @@ impl ControlBlinds {
 }
 
 impl DataPointType for ControlBlinds {
-    const MAIN_NUMBER: u16 = 3;
-    const SUB_NUMBER: u16 = UpDown::SUB_NUMBER;
+    const ID: DataPointId = DataPointId::new(3, UpDown::ID.sub);
 
     type ParseError<'a> = NomErr<In<'a>>;
 

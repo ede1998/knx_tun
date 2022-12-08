@@ -64,7 +64,7 @@ where
             o.and_then(|cemi| match GroupMessage::from_cemi(&cemi) {
                 Some(Ok(message)) => Some(Some(message)),
                 Some(Err(err)) => {
-                    warn!("Failed to parse {cemi:?} as {}: {err}", D::id());
+                    warn!("Failed to parse {cemi:?} as {}: {err}", D::ID);
                     None
                 }
                 None => None,
@@ -158,19 +158,11 @@ impl<T> GroupMessage<T> {
     where
         T: DataPointType,
     {
-        use crate::cemi::*;
-        let CemiBody::LData(ldata) = &cemi.body;
-        match &ldata.npdu.0 {
-            Tpdu::DataGroup(Apdu::GroupValueResponse(data) | Apdu::GroupValueWrite(data)) => {
-                Some(match T::from_data(data) {
-                    Ok(message) => Ok(GroupMessage {
-                        address: ldata.destination.into(),
-                        message,
-                    }),
-                    Err(err) => Err(err),
-                })
-            }
-            _ => None,
-        }
+        let data = cemi.group_data()?;
+        let address = cemi.address().try_into().ok()?;
+        Some(match T::from_data(data) {
+            Ok(message) => Ok(GroupMessage { address, message }),
+            Err(err) => Err(err),
+        })
     }
 }

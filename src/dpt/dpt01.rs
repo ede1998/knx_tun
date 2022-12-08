@@ -1,4 +1,4 @@
-use super::general::DataPointType;
+use super::general::{DataPointId, DataPointType};
 use crate::{
     cemi::GroupData,
     snack::{self, In, NomErr, U1},
@@ -60,8 +60,7 @@ macro_rules! impl_data_point_type {
         }
 
         impl DataPointType for $ty {
-            const MAIN_NUMBER: u16 = 1;
-            const SUB_NUMBER: u16 = $sub_number;
+            const ID: DataPointId = DataPointId::new(1, $sub_number);
 
             type ParseError<'a> = NomErr<&'a [u8]>;
             fn from_data<'a>(group_data: &'a GroupData) -> Result<Self, Self::ParseError<'a>> {
@@ -102,8 +101,7 @@ impl From<bool> for Trigger {
 }
 
 impl DataPointType for Trigger {
-    const MAIN_NUMBER: u16 = 1;
-    const SUB_NUMBER: u16 = 17;
+    const ID: DataPointId = DataPointId::new(1, 17);
 
     type ParseError<'a> = NomErr<In<'a>>;
     fn from_data<'a>(group_data: &'a GroupData) -> Result<Self, Self::ParseError<'a>> {

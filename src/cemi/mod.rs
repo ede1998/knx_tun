@@ -75,6 +75,16 @@ impl Cemi {
         let raw = ldata.destination;
         Address::from_raw(kind, raw)
     }
+
+    pub fn group_data(&self) -> Option<&GroupData> {
+        let CemiBody::LData(ldata) = &self.body;
+        match &ldata.npdu.0 {
+            Tpdu::DataGroup(Apdu::GroupValueResponse(data) | Apdu::GroupValueWrite(data)) => {
+                Some(data)
+            }
+            _ => None,
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CemiHeader {
