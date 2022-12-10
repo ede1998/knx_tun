@@ -619,7 +619,7 @@ impl<const N: u8> U<N> {
         }
     }
 
-    pub(crate) fn parse(i: (In, usize)) -> IBitResult<Self> {
+    pub fn parse(i: (In, usize)) -> IBitResult<Self> {
         use nm::*;
         map(bit_u8(N), Self)(i)
     }

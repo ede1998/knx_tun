@@ -1,4 +1,8 @@
-use std::str::FromStr;
+use std::{
+    num::{IntErrorKind, ParseIntError},
+    str::FromStr,
+};
+use thiserror::Error;
 
 use crate::snack::*;
 
@@ -113,6 +117,18 @@ impl std::fmt::Display for GroupAddress {
     }
 }
 
+impl FromStr for GroupAddress {
+    type Err = AddressParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let addr: Address = s.parse()?;
+        match addr.kind {
+            AddressKind::Individual => Err(AddressParseError::MissingSeparator),
+            AddressKind::Group => Ok(Self(addr.address)),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Address {
     kind: AddressKind,
@@ -195,13 +211,16 @@ impl Address {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AddressParseError {
-    MissingComponents,
-    TooManyComponent(usize),
+    #[error("expected exactly 3 components to form a KNX address but got {0}")]
+    WrongComponentCount(usize),
+    #[error("only 1 kind of separator (either '/' or '.') allowed but found both")]
     MixedSeparators,
+    #[error("failed to find any separator (either '/' or '.')")]
     MissingSeparator,
-    InvalidNumber(String),
+    #[error("error {1:?} while parsing number {0}")]
+    InvalidNumber(String, IntErrorKind),
 }
 
 impl FromStr for Address {
@@ -218,14 +237,21 @@ impl FromStr for Address {
         };
         let mut numbers = s.split(sep);
 
+        let mut components = 0;
         let mut parse_number = |max_value: u8| -> Result<u8, AddressParseError> {
-            let num = numbers.next().ok_or(AddressParseError::MissingComponents)?;
-            let number = num
-                .parse()
-                .map_err(|_| AddressParseError::InvalidNumber(num.to_owned()))?;
+            let num = numbers
+                .next()
+                .ok_or(AddressParseError::WrongComponentCount(components))?;
+            components += 1;
+            let number = num.parse().map_err(|e: ParseIntError| {
+                AddressParseError::InvalidNumber(num.to_owned(), e.kind().clone())
+            })?;
 
             if number > max_value {
-                Err(AddressParseError::InvalidNumber(num.to_owned()))
+                Err(AddressParseError::InvalidNumber(
+                    num.to_owned(),
+                    IntErrorKind::PosOverflow,
+                ))
             } else {
                 Ok(number)
             }
@@ -237,7 +263,7 @@ impl FromStr for Address {
 
         let remainder = numbers.count();
         if remainder > 0 {
-            return Err(AddressParseError::TooManyComponent(remainder));
+            return Err(AddressParseError::WrongComponentCount(remainder + 3));
         }
 
         Ok(Address {
